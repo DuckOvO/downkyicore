@@ -57,11 +57,11 @@ public sealed class OwnedProcessScopePlatformTests
             Assert.False(IsInJob(Environment.ProcessId, job));
 
             await scope.TerminateAsync(new CleanupDeadline(TimeSpan.FromSeconds(5))).ConfigureAwait(true);
-            await scope.Host.WaitForExitAsync(TestContext.Current.CancellationToken).WaitAsync(TimeSpan.FromSeconds(5),
-                TestContext.Current.CancellationToken).ConfigureAwait(true);
             Assert.False(IsAlive(scope.RootPid));
             Assert.False(IsAlive(childPid.Value));
             Assert.False(IsAlive(grandchildPid.Value));
+            await scope.Host.WaitForExitAsync(TestContext.Current.CancellationToken).WaitAsync(TimeSpan.FromSeconds(5),
+                TestContext.Current.CancellationToken).ConfigureAwait(true);
         }
         finally
         {
