@@ -127,7 +127,7 @@ internal sealed class OwnedProcessScope : IDisposable
             throw new Win32Exception(Marshal.GetLastPInvokeError());
         }
 
-        if (!OperatingSystem.IsLinux())
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
         {
             return;
         }
@@ -136,7 +136,41 @@ internal sealed class OwnedProcessScope : IDisposable
         {
             await Host.WaitForExitAsync(hostExit.Token).ConfigureAwait(false);
         }
-        await WaitForLinuxProcessGroupToEmptyAsync(deadline).ConfigureAwait(false);
+        if (OperatingSystem.IsMacOS())
+        {
+            await WaitForMacProcessGroupToEmptyAsync(deadline).ConfigureAwait(false);
+        }
+        else
+        {
+            await WaitForLinuxProcessGroupToEmptyAsync(deadline).ConfigureAwait(false);
+        }
+    }
+
+    internal async Task WaitForMacProcessGroupToEmptyAsync(CleanupDeadline deadline)
+    {
+        while (MacProcessGroupHasMembers(Host.Id))
+        {
+            var remaining = deadline.WorkWindow;
+            if (remaining == TimeSpan.Zero)
+            {
+                throw new TimeoutException(
+                    $"The owned macOS process group {Host.Id} is still active.");
+            }
+
+            await Task.Delay(TimeSpan.FromTicks(Math.Min(
+                TimeSpan.FromMilliseconds(10).Ticks, remaining.Ticks))).ConfigureAwait(false);
+        }
+    }
+
+    private static bool MacProcessGroupHasMembers(int groupId)
+    {
+        // Darwin killpg skips zombies, so signal 0 can return EPERM for a group
+        // that only contains zombies. libproc counts those members directly.
+        var member = new int[1];
+        var count = NativeMethods.ListProcessGroupPids(groupId, member, sizeof(int));
+        return count >= 0
+            ? count > 0
+            : throw new Win32Exception(Marshal.GetLastPInvokeError());
     }
 
     internal async Task WaitForLinuxProcessGroupToEmptyAsync(CleanupDeadline deadline)
@@ -362,6 +396,9 @@ internal sealed class OwnedProcessScope : IDisposable
         [DllImport("libc", EntryPoint = "killpg", SetLastError = true)]
         [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
         internal static extern int KillProcessGroup(int groupId, int signal);
+
+        [DllImport("/usr/lib/libproc.dylib", EntryPoint = "proc_listpgrppids", SetLastError = true)]
+        internal static extern int ListProcessGroupPids(int groupId, [Out] int[] buffer, int size);
 
         [DllImport("kernel32.dll", EntryPoint = "CreateJobObjectW", CharSet = CharSet.Unicode, SetLastError = true)]
         [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
