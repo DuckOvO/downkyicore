@@ -21,19 +21,19 @@ internal sealed class FlightRecorder
     };
 
     private readonly RecorderReport report;
-    private readonly TimeSpan snapshotTimeout;
+    private readonly TimeSpan recorderTimeout;
     private readonly Func<int, TimeSpan, Task<FinalProcessSnapshot>> snapshotCapture;
 
     private FlightRecorder(
         string evidencePath,
         RecorderReport report,
-        TimeSpan snapshotTimeout,
+        TimeSpan recorderTimeout,
         Func<int, TimeSpan, Task<FinalProcessSnapshot>> snapshotCapture,
         SensitiveEvidenceRedactor redactor)
     {
         EvidencePath = evidencePath;
         this.report = report;
-        this.snapshotTimeout = snapshotTimeout;
+        this.recorderTimeout = recorderTimeout;
         this.snapshotCapture = snapshotCapture;
         Redactor = redactor;
     }
@@ -128,8 +128,8 @@ internal sealed class FlightRecorder
         var rootPid = report.RootProcess?.Pid ?? 0;
         try
         {
-            var window = deadline?.SnapshotWindow ?? (snapshotTimeout < TimeSpan.FromSeconds(1)
-                ? snapshotTimeout
+            var window = deadline?.SnapshotWindow ?? (recorderTimeout < TimeSpan.FromSeconds(1)
+                ? recorderTimeout
                 : TimeSpan.FromSeconds(1));
             report.FinalSnapshot = await Task.Run(() => snapshotCapture(rootPid, window))
                 .WaitAsync(window).ConfigureAwait(false);
@@ -190,7 +190,8 @@ internal sealed class FlightRecorder
         }
         else
         {
-            await PersistWithinDeadlineAsync(deadline, PersistAsync).ConfigureAwait(false);
+            var persistenceDeadline = new CleanupDeadline(recorderTimeout);
+            await PersistWithinDeadlineAsync(persistenceDeadline, PersistAsync).ConfigureAwait(false);
         }
     }
 
