@@ -126,6 +126,44 @@ internal sealed class OwnedProcessScope : IDisposable
         {
             throw new Win32Exception(Marshal.GetLastPInvokeError());
         }
+
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        using (var hostExit = new CancellationTokenSource(deadline.WorkWindow))
+        {
+            await Host.WaitForExitAsync(hostExit.Token).ConfigureAwait(false);
+        }
+        await WaitForLinuxProcessGroupToEmptyAsync(deadline).ConfigureAwait(false);
+    }
+
+    internal async Task WaitForLinuxProcessGroupToEmptyAsync(CleanupDeadline deadline)
+    {
+        while (true)
+        {
+            if (NativeMethods.KillProcessGroup(Host.Id, 0) != 0)
+            {
+                var error = Marshal.GetLastPInvokeError();
+                if (error == NoSuchProcess)
+                {
+                    return;
+                }
+
+                throw new Win32Exception(error);
+            }
+
+            var remaining = deadline.WorkWindow;
+            if (remaining == TimeSpan.Zero)
+            {
+                throw new TimeoutException(
+                    $"The owned Linux process group {Host.Id} is still active.");
+            }
+
+            await Task.Delay(TimeSpan.FromTicks(Math.Min(
+                TimeSpan.FromMilliseconds(10).Ticks, remaining.Ticks))).ConfigureAwait(false);
+        }
     }
 
     public void Dispose()
