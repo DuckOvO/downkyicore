@@ -247,6 +247,58 @@ public sealed class OwnedProcessScopePlatformTests
         }
     }
 
+    [Fact]
+    public async Task MacGroupProbeDoesNotHideLiveGrandchild()
+    {
+        if (!OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        var directory = Path.Combine(Path.GetTempPath(), $"downkyi-scope-group-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        OwnedProcessScope? scope = null;
+        int? childPid = null;
+        int? grandchildPid = null;
+        try
+        {
+            var runtimeConfig = Path.Combine(AppContext.BaseDirectory,
+                $"{Path.GetFileNameWithoutExtension(typeof(OwnedProcessScopePlatformTests).Assembly.Location)}.runtimeconfig.json");
+            var startInfo = new ProcessStartInfo("dotnet") { UseShellExecute = false };
+            startInfo.ArgumentList.Add("exec");
+            startInfo.ArgumentList.Add("--runtimeconfig");
+            startInfo.ArgumentList.Add(runtimeConfig);
+            startInfo.ArgumentList.Add(typeof(FlightRecorderExecution).Assembly.Location);
+            startInfo.ArgumentList.Add("fixture-tree-root");
+            startInfo.ArgumentList.Add(runtimeConfig);
+            startInfo.ArgumentList.Add(directory);
+            scope = await OwnedProcessScope.StartAsync(
+                startInfo, TimeSpan.FromSeconds(5)).ConfigureAwait(true);
+            childPid = await ReadMarkerAsync(Path.Combine(directory, "child.pid")).ConfigureAwait(true);
+            grandchildPid = await ReadMarkerAsync(Path.Combine(directory, "grandchild.pid")).ConfigureAwait(true);
+
+            StopIfAlive(scope.RootPid);
+            StopIfAlive(childPid);
+            await scope.Host.WaitForExitAsync(TestContext.Current.CancellationToken)
+                .WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken).ConfigureAwait(true);
+            Assert.True(IsAlive(grandchildPid.Value));
+
+            var failure = await Record.ExceptionAsync(() => scope.WaitForMacProcessGroupToEmptyAsync(
+                new CleanupDeadline(TimeSpan.FromMilliseconds(100)))).ConfigureAwait(true);
+            Assert.IsType<TimeoutException>(failure);
+
+            await scope.TerminateAsync(new CleanupDeadline(TimeSpan.FromSeconds(5))).ConfigureAwait(true);
+            Assert.False(IsAlive(grandchildPid.Value));
+        }
+        finally
+        {
+            scope?.Dispose();
+            StopIfAlive(childPid);
+            StopIfAlive(grandchildPid);
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private static int GetProcessGroup(int pid) => NativeMethods.GetProcessGroup(pid);
 
     private static void AssertStopped(int pid)
