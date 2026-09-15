@@ -190,13 +190,28 @@ internal sealed class FlightRecorder
         }
         else
         {
-            await PersistAsync().WaitAsync(deadline.Remaining).ConfigureAwait(false);
+            await PersistWithinDeadlineAsync(deadline, PersistAsync).ConfigureAwait(false);
         }
     }
 
-    private Task PersistAsync()
+    internal static async Task PersistWithinDeadlineAsync(
+        CleanupDeadline deadline, Func<CancellationToken, Task> persistAsync)
+    {
+        using var cancellation = new CancellationTokenSource(deadline.Remaining);
+        try
+        {
+            await persistAsync(cancellation.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException exception) when (cancellation.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                "Recorder persistence exceeded the cleanup deadline.", exception);
+        }
+    }
+
+    private Task PersistAsync(CancellationToken cancellationToken = default)
     {
         var json = JsonSerializer.Serialize(report, JsonOptions);
-        return File.WriteAllTextAsync(EvidencePath, json);
+        return File.WriteAllTextAsync(EvidencePath, json, cancellationToken);
     }
 }
