@@ -313,10 +313,11 @@ public sealed class DownloadManagerCoordinatorTests
                 new SqliteDownloadTaskStoreOptions(_databasePath),
                 new SystemClock());
             var clock = new SystemClock();
-            TaskService = new DownloadTaskApplicationService(Store, new DownloadHistoryService(Store, Store), clock);
+            var historyService = DownloadHistoryService.CreateForSharedStore(Store);
+            TaskService = new DownloadTaskApplicationService(Store, historyService, clock);
             Storage = new DownloadTaskProjectionStore(
                 TaskService,
-                new DownloadHistoryService(Store, Store),
+                historyService,
                 clock);
             StateWriter = new DownloadTaskStateWriter(TaskService);
             Queue = new RecordingDownloadTaskQueue();
@@ -366,10 +367,11 @@ public sealed class DownloadManagerCoordinatorTests
             Store = new SqliteDownloadTaskStore(
                 new SqliteDownloadTaskStoreOptions(_databasePath), new SystemClock());
             var clock = new SystemClock();
-            TaskService = new DownloadTaskApplicationService(Store, new DownloadHistoryService(Store, Store), clock);
+            var historyService = DownloadHistoryService.CreateForSharedStore(Store);
+            TaskService = new DownloadTaskApplicationService(Store, historyService, clock);
             Storage = new DownloadTaskProjectionStore(
                 TaskService,
-                new DownloadHistoryService(Store, Store),
+                historyService,
                 clock);
             StateWriter = new DownloadTaskStateWriter(TaskService);
             Coordinator = new DownloadManagerCoordinator(

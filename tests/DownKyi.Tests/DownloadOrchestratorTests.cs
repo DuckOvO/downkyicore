@@ -231,7 +231,7 @@ public sealed class DownloadOrchestratorTests
 
         public OrchestratorContext()
         {
-            Tasks = new DownloadTaskApplicationService(_store, new DownloadHistoryService(_store, _store), new SystemClock());
+            Tasks = new DownloadTaskApplicationService(_store, DownloadHistoryService.CreateForSharedStore(_store), new SystemClock());
             StateWriter = new DownloadTaskStateWriter(Tasks);
         }
 

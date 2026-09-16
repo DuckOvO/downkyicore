@@ -203,10 +203,11 @@ public sealed class DownloadPipelineCommitBoundaryTests
             var settings = new SettingsStore(Path.Combine(directory, "settings.json"));
             var store = new CommitBoundaryStore(rejectCompletion, rejectPublishingStart);
             var clock = new SystemClock();
-            var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+            var historyService = DownloadHistoryService.CreateForSharedStore(store);
+            var tasks = new DownloadTaskApplicationService(store, historyService, clock);
             var projectionStore = new DownloadTaskProjectionStore(
                 tasks,
-                new DownloadHistoryService(store, store),
+                historyService,
                 clock);
             var stateWriter = new DownloadTaskStateWriter(tasks);
             var taskId = new DownloadTaskId(Guid.NewGuid().ToString("N"));

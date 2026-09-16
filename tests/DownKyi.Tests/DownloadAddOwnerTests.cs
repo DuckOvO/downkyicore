@@ -298,10 +298,11 @@ public sealed class DownloadAddOwnerTests : IDisposable
             DownloadTask? current = null)
         {
             Store = new MutableDownloadTaskStore(current);
-            _taskService = new DownloadTaskApplicationService(Store, new DownloadHistoryService(Store, Store), new SystemClock());
+            var historyService = DownloadHistoryService.CreateForSharedStore(Store);
+            _taskService = new DownloadTaskApplicationService(Store, historyService, new SystemClock());
             _projectionStore = new DownloadTaskProjectionStore(
                 _taskService,
-                new DownloadHistoryService(Store, Store),
+                historyService,
                 new SystemClock());
             ListState = new DownloadListState();
             Notifications = new RecordingNotificationService();

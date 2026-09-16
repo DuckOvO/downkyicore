@@ -16,6 +16,13 @@ public sealed class DownloadHistoryService : IDownloadHistoryService
         _history = history ?? throw new ArgumentNullException(nameof(history));
     }
 
+    public static DownloadHistoryService CreateForSharedStore<TStore>(TStore store)
+        where TStore : IDownloadTaskStore, IDownloadHistoryStore
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        return new DownloadHistoryService(store, store);
+    }
+
     public Task<OperationResult> AddAsync(
         DownloadHistoryRecord history,
         CancellationToken cancellationToken)

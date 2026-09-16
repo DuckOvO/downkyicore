@@ -206,10 +206,11 @@ public sealed class MuxFailureRecoveryTests
             var settings = new TestSettingsStore();
             var store = new SingleTaskStore();
             var clock = new SystemClock();
-            var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+            var historyService = DownloadHistoryService.CreateForSharedStore(store);
+            var tasks = new DownloadTaskApplicationService(store, historyService, clock);
             var projectionStore = new DownloadTaskProjectionStore(
                 tasks,
-                new DownloadHistoryService(store, store),
+                historyService,
                 clock);
             var stateWriter = new DownloadTaskStateWriter(tasks);
             var taskId = new DownloadTaskId("mux-recovery");

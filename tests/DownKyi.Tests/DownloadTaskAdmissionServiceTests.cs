@@ -24,10 +24,11 @@ public sealed class DownloadTaskAdmissionServiceTests : IDisposable
         Directory.CreateDirectory(_directory);
         using var store = CreateStore();
         var clock = new SystemClock();
-        using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+        var historyService = DownloadHistoryService.CreateForSharedStore(store);
+        using var tasks = new DownloadTaskApplicationService(store, historyService, clock);
         using var projections = new DownloadTaskProjectionStore(
             tasks,
-            new DownloadHistoryService(store, store),
+            historyService,
             clock);
         var listState = new DownloadListState();
         var queue = new RecordingDownloadTaskQueue();
@@ -57,10 +58,11 @@ public sealed class DownloadTaskAdmissionServiceTests : IDisposable
         Directory.CreateDirectory(_directory);
         using var store = CreateStore();
         var clock = new SystemClock();
-        using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+        var historyService = DownloadHistoryService.CreateForSharedStore(store);
+        using var tasks = new DownloadTaskApplicationService(store, historyService, clock);
         using var projections = new DownloadTaskProjectionStore(
             tasks,
-            new DownloadHistoryService(store, store),
+            historyService,
             clock);
         using var admission = CreateAdmission(
             new DownloadListState(),
@@ -93,10 +95,11 @@ public sealed class DownloadTaskAdmissionServiceTests : IDisposable
         Directory.CreateDirectory(_directory);
         using var store = CreateStore();
         var clock = new SystemClock();
-        using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+        var historyService = DownloadHistoryService.CreateForSharedStore(store);
+        using var tasks = new DownloadTaskApplicationService(store, historyService, clock);
         using var projections = new DownloadTaskProjectionStore(
             tasks,
-            new DownloadHistoryService(store, store),
+            historyService,
             clock);
         using var admission = CreateAdmission(
             new DownloadListState(),
@@ -131,10 +134,11 @@ public sealed class DownloadTaskAdmissionServiceTests : IDisposable
         using var innerStore = CreateStore();
         var store = new CountingDownloadTaskStore(innerStore);
         var clock = new SystemClock();
-        using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+        var historyService = DownloadHistoryService.CreateForSharedStore(store);
+        using var tasks = new DownloadTaskApplicationService(store, historyService, clock);
         using var projections = new DownloadTaskProjectionStore(
             tasks,
-            new DownloadHistoryService(store, store),
+            historyService,
             clock);
         using var admission = CreateAdmission(
             new DownloadListState(),
@@ -162,10 +166,11 @@ public sealed class DownloadTaskAdmissionServiceTests : IDisposable
         using var innerStore = CreateStore();
         var store = new CountingDownloadTaskStore(innerStore);
         var clock = new SystemClock();
-        using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+        var historyService = DownloadHistoryService.CreateForSharedStore(store);
+        using var tasks = new DownloadTaskApplicationService(store, historyService, clock);
         using var projections = new DownloadTaskProjectionStore(
             tasks,
-            new DownloadHistoryService(store, store),
+            historyService,
             clock);
         using var admission = CreateAdmission(
             new DownloadListState(),
@@ -198,10 +203,11 @@ public sealed class DownloadTaskAdmissionServiceTests : IDisposable
         using var innerStore = CreateStore();
         var store = new CountingDownloadTaskStore(innerStore);
         var clock = new SystemClock();
-        using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+        var historyService = DownloadHistoryService.CreateForSharedStore(store);
+        using var tasks = new DownloadTaskApplicationService(store, historyService, clock);
         using var projections = new DownloadTaskProjectionStore(
             tasks,
-            new DownloadHistoryService(store, store),
+            historyService,
             clock);
         var list = new DownloadListState();
         var queue = new RecordingDownloadTaskQueue();
@@ -257,10 +263,11 @@ public sealed class DownloadTaskAdmissionServiceTests : IDisposable
         using var innerStore = CreateStore();
         var store = new CountingDownloadTaskStore(innerStore);
         var clock = new SystemClock();
-        using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+        var historyService = DownloadHistoryService.CreateForSharedStore(store);
+        using var tasks = new DownloadTaskApplicationService(store, historyService, clock);
         using var projections = new DownloadTaskProjectionStore(
             tasks,
-            new DownloadHistoryService(store, store),
+            historyService,
             clock);
         var listState = new DownloadListState();
         var queue = new AdmissionObservingQueue(listState, projections);
@@ -300,10 +307,11 @@ public sealed class DownloadTaskAdmissionServiceTests : IDisposable
         Directory.CreateDirectory(_directory);
         using var store = CreateStore();
         var clock = new SystemClock();
-        using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+        var historyService = DownloadHistoryService.CreateForSharedStore(store);
+        using var tasks = new DownloadTaskApplicationService(store, historyService, clock);
         using var projections = new DownloadTaskProjectionStore(
             tasks,
-            new DownloadHistoryService(store, store),
+            historyService,
             clock);
         var listState = new DownloadListState();
         var queue = new RecordingDownloadTaskQueue();
@@ -332,10 +340,11 @@ public sealed class DownloadTaskAdmissionServiceTests : IDisposable
         using var innerStore = CreateStore();
         var store = new CountingDownloadTaskStore(innerStore) { RejectAdds = true };
         var clock = new SystemClock();
-        using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+        var historyService = DownloadHistoryService.CreateForSharedStore(store);
+        using var tasks = new DownloadTaskApplicationService(store, historyService, clock);
         using var projections = new DownloadTaskProjectionStore(
             tasks,
-            new DownloadHistoryService(store, store),
+            historyService,
             clock);
         var listState = new DownloadListState();
         var queue = new RecordingDownloadTaskQueue();
@@ -358,10 +367,11 @@ public sealed class DownloadTaskAdmissionServiceTests : IDisposable
         Directory.CreateDirectory(_directory);
         using var store = CreateStore();
         var clock = new SystemClock();
-        using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+        var historyService = DownloadHistoryService.CreateForSharedStore(store);
+        using var tasks = new DownloadTaskApplicationService(store, historyService, clock);
         using var projections = new DownloadTaskProjectionStore(
             tasks,
-            new DownloadHistoryService(store, store),
+            historyService,
             clock);
         var listState = new DownloadListState();
         var gateway = new DownloadTaskQueueGateway();
@@ -389,10 +399,11 @@ public sealed class DownloadTaskAdmissionServiceTests : IDisposable
         Directory.CreateDirectory(_directory);
         using var store = CreateStore();
         var clock = new SystemClock();
-        using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+        var historyService = DownloadHistoryService.CreateForSharedStore(store);
+        using var tasks = new DownloadTaskApplicationService(store, historyService, clock);
         using var projections = new DownloadTaskProjectionStore(
             tasks,
-            new DownloadHistoryService(store, store),
+            historyService,
             clock);
         var listState = new DownloadListState();
         var gateway = new DownloadTaskQueueGateway();
@@ -423,10 +434,11 @@ public sealed class DownloadTaskAdmissionServiceTests : IDisposable
         Directory.CreateDirectory(_directory);
         using var store = CreateStore();
         var clock = new SystemClock();
-        using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+        var historyService = DownloadHistoryService.CreateForSharedStore(store);
+        using var tasks = new DownloadTaskApplicationService(store, historyService, clock);
         using var projections = new DownloadTaskProjectionStore(
             tasks,
-            new DownloadHistoryService(store, store),
+            historyService,
             clock);
         var listState = new DownloadListState();
         using var admission = CreateAdmission(
@@ -455,10 +467,11 @@ public sealed class DownloadTaskAdmissionServiceTests : IDisposable
         Directory.CreateDirectory(_directory);
         using var store = CreateStore();
         var clock = new SystemClock();
-        using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+        var historyService = DownloadHistoryService.CreateForSharedStore(store);
+        using var tasks = new DownloadTaskApplicationService(store, historyService, clock);
         using var projections = new DownloadTaskProjectionStore(
             tasks,
-            new DownloadHistoryService(store, store),
+            historyService,
             clock);
         var frozenBasePath = Path.Combine(_directory, "physical-target", "output");
         var currentTarget = frozenBasePath;
@@ -519,10 +532,11 @@ public sealed class DownloadTaskAdmissionServiceTests : IDisposable
         Directory.CreateDirectory(_directory);
         using var store = CreateStore();
         var clock = new SystemClock();
-        using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+        var historyService = DownloadHistoryService.CreateForSharedStore(store);
+        using var tasks = new DownloadTaskApplicationService(store, historyService, clock);
         using var projections = new DownloadTaskProjectionStore(
             tasks,
-            new DownloadHistoryService(store, store),
+            historyService,
             clock);
         using var admission = CreateAdmission(
             new DownloadListState(), tasks, projections, new RecordingDownloadTaskQueue());
@@ -541,10 +555,11 @@ public sealed class DownloadTaskAdmissionServiceTests : IDisposable
         Directory.CreateDirectory(_directory);
         using var store = CreateStore();
         var clock = new SystemClock();
-        using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+        var historyService = DownloadHistoryService.CreateForSharedStore(store);
+        using var tasks = new DownloadTaskApplicationService(store, historyService, clock);
         using var projections = new DownloadTaskProjectionStore(
             tasks,
-            new DownloadHistoryService(store, store),
+            historyService,
             clock);
         using var admission = CreateAdmission(
             new DownloadListState(), tasks, projections, new RecordingDownloadTaskQueue());
@@ -567,10 +582,11 @@ public sealed class DownloadTaskAdmissionServiceTests : IDisposable
         using (var firstStore = CreateStore())
         {
             var clock = new SystemClock();
-            using var firstTasks = new DownloadTaskApplicationService(firstStore, new DownloadHistoryService(firstStore, firstStore), clock);
+            var firstHistoryService = DownloadHistoryService.CreateForSharedStore(firstStore);
+            using var firstTasks = new DownloadTaskApplicationService(firstStore, firstHistoryService, clock);
             using var firstProjections = new DownloadTaskProjectionStore(
                 firstTasks,
-                new DownloadHistoryService(firstStore, firstStore),
+                firstHistoryService,
                 clock);
             using var firstAdmission = CreateAdmission(
                 new DownloadListState(), firstTasks, firstProjections, new RecordingDownloadTaskQueue());
@@ -579,10 +595,11 @@ public sealed class DownloadTaskAdmissionServiceTests : IDisposable
 
         using var reopenedStore = CreateStore();
         var reopenedClock = new SystemClock();
-        using var reopenedTasks = new DownloadTaskApplicationService(reopenedStore, new DownloadHistoryService(reopenedStore, reopenedStore), reopenedClock);
+        var reopenedHistoryService = DownloadHistoryService.CreateForSharedStore(reopenedStore);
+        using var reopenedTasks = new DownloadTaskApplicationService(reopenedStore, reopenedHistoryService, reopenedClock);
         using var reopenedProjections = new DownloadTaskProjectionStore(
             reopenedTasks,
-            new DownloadHistoryService(reopenedStore, reopenedStore),
+            reopenedHistoryService,
             reopenedClock);
         using var reopenedAdmission = CreateAdmission(
             new DownloadListState(), reopenedTasks, reopenedProjections, new RecordingDownloadTaskQueue());
@@ -599,10 +616,11 @@ public sealed class DownloadTaskAdmissionServiceTests : IDisposable
         using var innerStore = CreateStore();
         var store = new CountingDownloadTaskStore(innerStore);
         var clock = new SystemClock();
-        using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+        var historyService = DownloadHistoryService.CreateForSharedStore(store);
+        using var tasks = new DownloadTaskApplicationService(store, historyService, clock);
         using var projections = new DownloadTaskProjectionStore(
             tasks,
-            new DownloadHistoryService(store, store),
+            historyService,
             clock);
         using var admission = CreateAdmission(
             new DownloadListState(),
@@ -633,10 +651,11 @@ public sealed class DownloadTaskAdmissionServiceTests : IDisposable
         using var innerStore = CreateStore();
         var store = new CountingDownloadTaskStore(innerStore);
         var clock = new SystemClock();
-        using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+        var historyService = DownloadHistoryService.CreateForSharedStore(store);
+        using var tasks = new DownloadTaskApplicationService(store, historyService, clock);
         using var projections = new DownloadTaskProjectionStore(
             tasks,
-            new DownloadHistoryService(store, store),
+            historyService,
             clock);
         using var admission = CreateAdmission(
             new DownloadListState(), tasks, projections, new RecordingDownloadTaskQueue());
@@ -663,10 +682,11 @@ public sealed class DownloadTaskAdmissionServiceTests : IDisposable
         using var innerStore = CreateStore();
         var store = new CountingDownloadTaskStore(innerStore);
         var clock = new SystemClock();
-        using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+        var historyService = DownloadHistoryService.CreateForSharedStore(store);
+        using var tasks = new DownloadTaskApplicationService(store, historyService, clock);
         using var projections = new DownloadTaskProjectionStore(
             tasks,
-            new DownloadHistoryService(store, store),
+            historyService,
             clock);
         using var admission = CreateAdmission(
             new DownloadListState(), tasks, projections, new RecordingDownloadTaskQueue());

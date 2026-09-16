@@ -20,10 +20,11 @@ internal static class DownloadRestoreScenario
         var store = new SqliteDownloadTaskStore(
             new SqliteDownloadTaskStoreOptions(databasePath),
             clock);
-        var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+        var historyService = DownloadHistoryService.CreateForSharedStore(store);
+        var tasks = new DownloadTaskApplicationService(store, historyService, clock);
         var projection = new DownloadTaskProjectionStore(
             tasks,
-            new DownloadHistoryService(store, store),
+            historyService,
             clock);
         try
         {

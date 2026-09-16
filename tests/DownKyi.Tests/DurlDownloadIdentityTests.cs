@@ -105,10 +105,11 @@ public sealed class DurlDownloadIdentityTests
                 new SqliteDownloadTaskStoreOptions(databasePath),
                 new SystemClock());
             var clock = new SystemClock();
-            using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+            var historyService = DownloadHistoryService.CreateForSharedStore(store);
+            using var tasks = new DownloadTaskApplicationService(store, historyService, clock);
             using var projectionStore = new DownloadTaskProjectionStore(
                 tasks,
-                new DownloadHistoryService(store, store),
+                historyService,
                 clock);
             using var settings = new TestSettingsStore();
             var taskId = new DownloadTaskId(downloadBase.Id);

@@ -384,10 +384,11 @@ public sealed class VideoTagLoadingTests : IDisposable
             });
             Store = new RecordingDownloadTaskStore();
             var clock = new SystemClock();
-            _taskService = new DownloadTaskApplicationService(Store, new DownloadHistoryService(Store, Store), clock);
+            var historyService = DownloadHistoryService.CreateForSharedStore(Store);
+            _taskService = new DownloadTaskApplicationService(Store, historyService, clock);
             _projectionStore = new DownloadTaskProjectionStore(
                 _taskService,
-                new DownloadHistoryService(Store, Store),
+                historyService,
                 clock);
             ListState = new DownloadListState();
             Queue = new RecordingDownloadTaskQueue();

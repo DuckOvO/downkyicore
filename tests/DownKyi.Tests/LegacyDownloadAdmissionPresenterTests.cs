@@ -13,7 +13,7 @@ public sealed class LegacyDownloadAdmissionPresenterTests
     public async Task CancelLeavesGateBlockedWithoutCallingConfirmation()
     {
         var store = new GateStore();
-        using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), new SystemClock());
+        using var tasks = new DownloadTaskApplicationService(store, DownloadHistoryService.CreateForSharedStore(store), new SystemClock());
         var dialogs = new RecordingDialogService(AppDialogOutcome.Canceled);
         var presenter = new LegacyDownloadAdmissionPresenter(tasks, dialogs);
 
@@ -31,7 +31,7 @@ public sealed class LegacyDownloadAdmissionPresenterTests
     public async Task ConfirmationOnlyReleasesGateAndAllowsSameSessionWithoutAnotherDialog()
     {
         var store = new GateStore();
-        using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), new SystemClock());
+        using var tasks = new DownloadTaskApplicationService(store, DownloadHistoryService.CreateForSharedStore(store), new SystemClock());
         var dialogs = new RecordingDialogService(AppDialogOutcome.Accepted);
         var presenter = new LegacyDownloadAdmissionPresenter(tasks, dialogs);
 
@@ -54,7 +54,7 @@ public sealed class LegacyDownloadAdmissionPresenterTests
                 "download.store.confirmation_failed",
                 "The confirmation could not be persisted."))
         };
-        using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), new SystemClock());
+        using var tasks = new DownloadTaskApplicationService(store, DownloadHistoryService.CreateForSharedStore(store), new SystemClock());
         var dialogs = new RecordingDialogService(
             AppDialogOutcome.Accepted,
             AppDialogOutcome.Accepted);
