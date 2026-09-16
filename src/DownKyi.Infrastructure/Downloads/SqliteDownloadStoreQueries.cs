@@ -92,15 +92,39 @@ internal sealed class SqliteDownloadStoreQueries(
             ORDER BY h.finished_timestamp DESC, h.id DESC
             LIMIT @limit
             """;
-        command.Parameters.AddWithValue("@cursor_timestamp", cursor?.FinishedTimestamp ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("@cursor_id", cursor?.TaskId.Value ?? string.Empty);
-        command.Parameters.AddWithValue("@limit", checked(pageSize + 1));
-        var items = (await ReadHistoryManyAsync(
-                connection,
-                command,
-                _clock.UtcNow,
-                cancellationToken).ConfigureAwait(false))
-            .ToList();
+        var cursorTimestamp = command.Parameters.Add("@cursor_timestamp", SqliteType.Integer);
+        var cursorId = command.Parameters.Add("@cursor_id", SqliteType.Text);
+        var limit = command.Parameters.Add("@limit", SqliteType.Integer);
+        var targetCount = checked(pageSize + 1);
+        var items = new List<DownloadHistoryRecord>(targetCount);
+        var scanCursor = cursor;
+        while (items.Count < targetCount)
+        {
+            cursorTimestamp.Value = scanCursor == null
+                ? DBNull.Value
+                : scanCursor.FinishedTimestamp;
+            cursorId.Value = scanCursor?.TaskId.Value ?? string.Empty;
+            var remainingCount = targetCount - items.Count;
+            limit.Value = remainingCount;
+            var batch = await ReadHistoryManyAsync(
+                    connection,
+                    command,
+                    _clock.UtcNow,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            items.AddRange(batch.Records);
+            if (batch.RowsRead < remainingCount)
+            {
+                break;
+            }
+
+            if (batch.Records.Count > 0)
+            {
+                var last = batch.Records[^1];
+                scanCursor = new DownloadHistoryCursor(last.FinishedTimestamp, last.Id);
+            }
+        }
+
         var hasMore = items.Count > pageSize;
         if (hasMore)
         {
@@ -117,7 +141,8 @@ internal sealed class SqliteDownloadStoreQueries(
         return new DownloadHistoryPage(items, nextCursor);
     }
 
-    private static async Task<IReadOnlyList<DownloadHistoryRecord>> ReadHistoryManyAsync(
+    private static async Task<(IReadOnlyList<DownloadHistoryRecord> Records, int RowsRead)>
+        ReadHistoryManyAsync(
         SqliteConnection connection,
         SqliteCommand command,
         DateTimeOffset quarantinedAtUtc,
@@ -125,10 +150,12 @@ internal sealed class SqliteDownloadStoreQueries(
     {
         var records = new List<DownloadHistoryRecord>();
         var corrupt = new List<(string RecordId, DownloadRecordCorruptException Error)>();
+        var rowsRead = 0;
         using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
         {
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
+                rowsRead++;
                 var recordId = reader.GetString(reader.GetOrdinal("id"));
                 try
                 {
@@ -154,7 +181,7 @@ internal sealed class SqliteDownloadStoreQueries(
                 .ConfigureAwait(false);
         }
 
-        return records;
+        return (records, rowsRead);
     }
 
     private static async Task<IReadOnlyList<DownloadTask>> ReadManyAsync(
