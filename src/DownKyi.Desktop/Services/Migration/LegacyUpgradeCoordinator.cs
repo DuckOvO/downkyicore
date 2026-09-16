@@ -348,7 +348,7 @@ internal sealed class LegacyUpgradeCoordinator : ILegacyUpgradeCoordinator
                 var downloaded = ConvertDownload(item);
                 if (downloaded != null)
                 {
-                    batch.Add(LegacyDownloadTaskMapper.RestoreCompleted(downloaded, _clock.UtcNow));
+                    batch.Add(LegacyDownloadHistoryTaskFactory.Create(downloaded, _clock.UtcNow));
                 }
             }
             catch (Exception e) when (IsLegacyRecordException(e) || e is SqliteException)

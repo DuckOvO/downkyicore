@@ -16,25 +16,19 @@ internal static class DownloadStoreSchema
         IPhysicalOutputPathResolver physicalOutputPathResolver,
         CancellationToken cancellationToken)
     {
-        var currentVersion = await DownloadStoreSchemaLifecycle
-            .ReadUserVersionAsync(connection, cancellationToken)
+        var format = await LegacyDownloadStoreFormatDetector
+            .DetectAsync(connection, databaseExisted, cancellationToken)
             .ConfigureAwait(false);
-        if (currentVersion > CurrentVersion)
-        {
-            throw new InvalidOperationException(
-                $"Download database schema {currentVersion} is newer than supported schema {CurrentVersion}.");
-        }
-
-        if (databaseExisted && currentVersion < CurrentVersion)
-        {
-            await DownloadStoreSchemaLifecycle
-                .BackupAsync(connection, databasePath, currentVersion, clock, cancellationToken)
-                .ConfigureAwait(false);
-        }
-
-        if (currentVersion == CurrentVersion)
+        if (format.IsCurrent)
         {
             return;
+        }
+
+        if (format.DatabaseExisted)
+        {
+            await DownloadStoreSchemaLifecycle
+                .BackupAsync(connection, databasePath, format.UserVersion, clock, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         using var transaction = (SqliteTransaction)await connection
@@ -42,70 +36,31 @@ internal static class DownloadStoreSchema
             .ConfigureAwait(false);
         try
         {
-            if (currentVersion < 1)
+            if (format.IsNew)
             {
-                await DownloadStoreSchemaV1Migration
-                    .ApplyAsync(connection, transaction, clock.UtcNow, cancellationToken)
+                await CurrentDownloadStoreWriter
+                    .CreateAsync(connection, transaction, clock.UtcNow, cancellationToken)
                     .ConfigureAwait(false);
             }
-
-            if (currentVersion < 2)
+            else
             {
-                await DownloadStoreSchemaV2Migration
-                    .ApplyAsync(connection, transaction, clock.UtcNow, cancellationToken)
+                var snapshot = await LegacyDownloadStoreReader
+                    .ReadAsync(connection, transaction, format, cancellationToken)
                     .ConfigureAwait(false);
-            }
-
-            if (currentVersion < 3)
-            {
-                await DownloadStoreSchemaV3Migration
-                    .ApplyAsync(connection, transaction, clock.UtcNow, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-
-            if (currentVersion < 4)
-            {
-                await DownloadStoreSchemaV4Migration
-                    .ApplyAsync(
+                var plan = LegacyDownloadStoreNormalizer.Normalize(
+                    snapshot,
+                    physicalOutputPathResolver);
+                await CurrentDownloadStoreWriter
+                    .UpgradeAsync(
                         connection,
                         transaction,
+                        format,
+                        plan,
                         clock.UtcNow,
-                        physicalOutputPathResolver,
                         cancellationToken)
                     .ConfigureAwait(false);
             }
 
-            if (currentVersion < 5)
-            {
-                await DownloadStoreSchemaV5Migration
-                    .ApplyAsync(connection, transaction, clock.UtcNow, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-
-            if (currentVersion < 6)
-            {
-                await DownloadStoreSchemaV6Migration
-                    .ApplyAsync(connection, transaction, clock.UtcNow, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-
-            if (currentVersion < 7)
-            {
-                await DownloadStoreSchemaV7Migration
-                    .ApplyAsync(connection, transaction, clock.UtcNow, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-
-            if (currentVersion < 8)
-            {
-                await DownloadStoreSchemaV8Migration
-                    .ApplyAsync(connection, transaction, clock.UtcNow, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-
-            await DownloadStoreSchemaLifecycle
-                .SetUserVersionAsync(connection, transaction, CurrentVersion, cancellationToken)
-                .ConfigureAwait(false);
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         }
         catch
