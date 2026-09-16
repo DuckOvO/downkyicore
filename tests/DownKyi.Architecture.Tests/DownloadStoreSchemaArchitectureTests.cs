@@ -4,24 +4,18 @@ namespace DownKyi.Architecture.Tests;
 
 public sealed class DownloadStoreSchemaArchitectureTests
 {
-    private const string MigrationOwnerNamespace = "DownKyi.Infrastructure.Downloads";
-    private const string MigrationOwnerPrefix = "DownloadStoreSchemaV";
-    private const string MigrationOwnerSuffix = "Migration";
     private static readonly string RepositoryRoot = FindRepositoryRoot();
-    private static readonly string[] MigrationOwners = typeof(SqliteDownloadTaskStoreOptions)
-        .Assembly
-        .GetTypes()
-        .Where(IsMigrationOwner)
-        .Select(type => type.Name)
-        .Order(StringComparer.Ordinal)
-        .ToArray();
 
     [Fact]
-    public void CoordinatorOwnsUpgradeOrderWithoutOwningMigrationSql()
+    public void CoordinatorOwnsAtomicFlowWithoutOwningFormatOrSqlRules()
     {
         var source = ReadDownloadSource("DownloadStoreSchema.cs");
 
-        Assert.Contains("public const int CurrentVersion = 8", source, StringComparison.Ordinal);
+        Assert.Contains("public const int CurrentVersion = 9", source, StringComparison.Ordinal);
+        Assert.Contains("LegacyDownloadStoreFormatDetector", source, StringComparison.Ordinal);
+        Assert.Contains("LegacyDownloadStoreReader", source, StringComparison.Ordinal);
+        Assert.Contains("LegacyDownloadStoreNormalizer", source, StringComparison.Ordinal);
+        Assert.Contains("CurrentDownloadStoreWriter", source, StringComparison.Ordinal);
         Assert.Contains("BeginTransactionAsync", source, StringComparison.Ordinal);
         Assert.Contains("CommitAsync", source, StringComparison.Ordinal);
         Assert.Contains("RollbackAsync", source, StringComparison.Ordinal);
@@ -29,72 +23,84 @@ public sealed class DownloadStoreSchemaArchitectureTests
         Assert.DoesNotContain("CommandText", source, StringComparison.Ordinal);
         Assert.DoesNotContain("CREATE TABLE", source, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("ALTER TABLE", source, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("CREATE INDEX", source, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("UPDATE downloading", source, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void VersionOwnersAreNamedNonPartialAndReceiveTheCompleteMigrationContext()
+    public void DetectorOnlyInspectsSchemaFingerprint()
     {
-        foreach (var owner in MigrationOwners)
-        {
-            var source = ReadDownloadSource($"{owner}.cs");
+        var source = ReadDownloadSource("LegacyDownloadStoreFormatDetector.cs");
 
-            Assert.Contains($"internal static class {owner}", source, StringComparison.Ordinal);
-            Assert.DoesNotContain($"partial class {owner}", source, StringComparison.Ordinal);
-            Assert.Contains("SqliteConnection connection", source, StringComparison.Ordinal);
-            Assert.Contains("SqliteTransaction transaction", source, StringComparison.Ordinal);
-            Assert.Contains("DateTimeOffset appliedAtUtc", source, StringComparison.Ordinal);
-            Assert.Contains("CancellationToken cancellationToken", source, StringComparison.Ordinal);
-        }
+        Assert.Contains("sqlite_master", source, StringComparison.Ordinal);
+        Assert.Contains("PRAGMA table_info", source, StringComparison.Ordinal);
+        Assert.Contains("LegacyDownloadStoreKind.Relational", source, StringComparison.Ordinal);
+        Assert.Contains("LegacyDownloadStoreKind.Stateful", source, StringComparison.Ordinal);
+        Assert.Contains("LegacyDownloadStoreKind.Reserved", source, StringComparison.Ordinal);
+        Assert.Contains("LegacyDownloadStoreKind.AdmissionSafe", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("ALTER TABLE", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("CREATE TABLE", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("UPDATE download", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("INSERT INTO", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("IPhysicalOutputPathResolver", source, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void VersionOwnerDiscoveryIncludesFutureVersionsAndRejectsLookalikes()
+    public void ReaderOnlyExtractsLegacyFacts()
     {
-        Assert.NotEmpty(MigrationOwners);
-        Assert.True(IsMigrationOwner(MigrationOwnerNamespace, "DownloadStoreSchemaV4Migration"));
-        Assert.False(IsMigrationOwner(MigrationOwnerNamespace, "DownloadStoreSchemaV0Migration"));
-        Assert.False(IsMigrationOwner(MigrationOwnerNamespace, "DownloadStoreSchemaV04Migration"));
-        Assert.False(IsMigrationOwner(MigrationOwnerNamespace, "DownloadStoreSchemaV4MigrationHelper"));
-        Assert.False(IsMigrationOwner("DownKyi.Infrastructure.Other", "DownloadStoreSchemaV4Migration"));
+        var source = ReadDownloadSource("LegacyDownloadStoreReader.cs");
+
+        Assert.Contains("SELECT db.id", source, StringComparison.Ordinal);
+        Assert.Contains("LegacyDownloadStoreSnapshot", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("ALTER TABLE", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("CREATE TABLE", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("UPDATE download", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DownloadOutputPathKey", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("IPhysicalOutputPathResolver", source, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void VersionOwnersDoNotDependOnOneAnother()
+    public void NormalizerOwnsLegacyMeaningWithoutOwningSql()
     {
-        foreach (var owner in MigrationOwners)
-        {
-            var source = ReadDownloadSource($"{owner}.cs");
-            var otherOwners = MigrationOwners.Where(candidate => candidate != owner);
+        var source = ReadDownloadSource("LegacyDownloadStoreNormalizer.cs");
 
-            Assert.All(
-                otherOwners,
-                otherOwner => Assert.DoesNotContain(otherOwner, source, StringComparison.Ordinal));
-        }
-    }
-
-    [Fact]
-    public void VersionFourOwnsOnlyLegacyClassificationQuarantineAndAdmissionState()
-    {
-        var source = ReadDownloadSource("DownloadStoreSchemaV4Migration.cs");
-
-        Assert.Contains("IPhysicalOutputPathResolver", source, StringComparison.Ordinal);
+        Assert.Contains("MapLegacyStatus", source, StringComparison.Ordinal);
         Assert.Contains("DownloadOutputPathKey.Create", source, StringComparison.Ordinal);
-        Assert.Contains("download_quarantine", source, StringComparison.Ordinal);
-        Assert.Contains("download_upgrade_admission_gate", source, StringComparison.Ordinal);
-        Assert.Contains("NOT EXISTS (", source, StringComparison.Ordinal);
-        Assert.Contains("FROM downloaded", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("UPDATE download_base", source, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("UPDATE downloading", source, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("DELETE FROM", source, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("File.Delete", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("Directory.Delete", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("File.Move", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("Directory.Move", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("Aria2", source, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(".Stop", source, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("ResetAsync", source, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("IPhysicalOutputPathResolver", source, StringComparison.Ordinal);
+        Assert.Contains("Guid.NewGuid", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("Microsoft.Data.Sqlite", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("CommandText", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("CREATE TABLE", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ALTER TABLE", source, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CurrentWriterOwnsLatestSchemaWithoutVersionBranches()
+    {
+        var source = ReadDownloadSource("CurrentDownloadStoreWriter.cs");
+
+        Assert.Contains("CREATE TABLE download_base", source, StringComparison.Ordinal);
+        Assert.Contains("CREATE TABLE download_history", source, StringComparison.Ordinal);
+        Assert.Contains("ProjectLegacyHistoryAsync", source, StringComparison.Ordinal);
+        Assert.Contains("ApplyPhaseUpdatesAsync", source, StringComparison.Ordinal);
+        Assert.Contains("ApplyReservationUpdatesAsync", source, StringComparison.Ordinal);
+        Assert.Contains("ApplyQuarantineAsync", source, StringComparison.Ordinal);
+        Assert.Contains("SetUserVersionAsync", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("format.UserVersion", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("DownloadStoreSchemaV", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("IPhysicalOutputPathResolver", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HistoricalVersionMigrationOwnersAreRemoved()
+    {
+        var owners = typeof(SqliteDownloadTaskStoreOptions)
+            .Assembly
+            .GetTypes()
+            .Where(type => type.Namespace == "DownKyi.Infrastructure.Downloads")
+            .Select(type => type.Name)
+            .Where(name => name.StartsWith("DownloadStoreSchemaV", StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.Empty(owners);
     }
 
     private static string ReadDownloadSource(string fileName)
@@ -105,39 +111,6 @@ public sealed class DownloadStoreSchemaArchitectureTests
             "DownKyi.Infrastructure",
             "Downloads",
             fileName));
-    }
-
-    private static bool IsMigrationOwner(Type type)
-    {
-        return type.DeclaringType is null && IsMigrationOwner(type.Namespace, type.Name);
-    }
-
-    private static bool IsMigrationOwner(string? typeNamespace, string typeName)
-    {
-        if (!string.Equals(typeNamespace, MigrationOwnerNamespace, StringComparison.Ordinal)
-            || !typeName.StartsWith(MigrationOwnerPrefix, StringComparison.Ordinal)
-            || !typeName.EndsWith(MigrationOwnerSuffix, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        var version = typeName.AsSpan(
-            MigrationOwnerPrefix.Length,
-            typeName.Length - MigrationOwnerPrefix.Length - MigrationOwnerSuffix.Length);
-        if (version.IsEmpty || version[0] == '0')
-        {
-            return false;
-        }
-
-        foreach (var character in version)
-        {
-            if (character is < '0' or > '9')
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     private static string FindRepositoryRoot()

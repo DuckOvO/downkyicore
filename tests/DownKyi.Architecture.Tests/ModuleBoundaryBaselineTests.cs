@@ -257,9 +257,23 @@ public sealed class ModuleBoundaryBaselineTests
 
         Assert.Equal(
             [
-                "src/DownKyi.Desktop/Services/Migration/LegacyDownloadTaskMapper.cs",
                 "src/DownKyi.Infrastructure/Downloads/DownloadTaskRecordMapper.cs"
             ],
+            actual.Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void CompletedHistoryImportIsRestrictedToTheLegacyHistoryFactory()
+    {
+        var actual = EnumerateProductionFiles("*.cs")
+            .Where(path => File.ReadAllText(path).Contains(
+                "DownloadTask.ImportCompletedHistory",
+                StringComparison.Ordinal))
+            .Select(Relative)
+            .ToArray();
+
+        Assert.Equal(
+            ["src/DownKyi.Desktop/Services/Migration/LegacyDownloadHistoryTaskFactory.cs"],
             actual.Order(StringComparer.Ordinal));
     }
 

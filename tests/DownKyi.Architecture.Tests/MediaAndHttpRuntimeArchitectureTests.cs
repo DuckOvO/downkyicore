@@ -789,8 +789,8 @@ public sealed class MediaAndHttpRuntimeArchitectureTests
         Assert.Contains("Task.Run", coordinatorSource, StringComparison.Ordinal);
         Assert.Contains("CancellationToken", coordinatorSource, StringComparison.Ordinal);
         Assert.Contains("using var database", coordinatorSource, StringComparison.Ordinal);
-        Assert.Contains("LegacyDownloadTaskMapper.RestoreCompleted", coordinatorSource, StringComparison.Ordinal);
-        Assert.Contains("AddMigratedCompletedAsync", coordinatorSource, StringComparison.Ordinal);
+        Assert.Contains("LegacyDownloadHistoryTaskFactory.Create", coordinatorSource, StringComparison.Ordinal);
+        Assert.Contains("AddMigratedHistoryAsync", coordinatorSource, StringComparison.Ordinal);
         Assert.Contains("ILogger<LegacyUpgradeCoordinator>", coordinatorSource, StringComparison.Ordinal);
         Assert.DoesNotContain("LogManager.", coordinatorSource, StringComparison.Ordinal);
         Assert.DoesNotContain("Console.", coordinatorSource, StringComparison.Ordinal);
