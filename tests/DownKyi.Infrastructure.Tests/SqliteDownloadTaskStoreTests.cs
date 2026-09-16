@@ -26,10 +26,39 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
         version.CommandText = "PRAGMA user_version";
         Assert.Equal(8L, await version.ExecuteScalarAsync(TestContext.Current.CancellationToken));
         Assert.True(await TableExistsAsync("download_upgrade_admission_gate"));
-        Assert.Equal(1, await CountSchemaMigrationAsync(4));
-        Assert.Equal(1, await CountSchemaMigrationAsync(5));
+        Assert.Equal(0, await CountSchemaMigrationAsync(4));
+        Assert.Equal(0, await CountSchemaMigrationAsync(5));
+        Assert.Equal(1, await CountSchemaMigrationAsync(8));
         Assert.False(await store.IsLegacyUpgradeAdmissionBlockedAsync(
             TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task InitializeTreatsExistingEmptyDatabaseAsNewWithoutLosingBackup()
+    {
+        Directory.CreateDirectory(_directory);
+        using (var connection = new SqliteConnection(
+                   new SqliteConnectionStringBuilder
+                   {
+                       DataSource = Path.Combine(_directory, "download.db"),
+                       Mode = SqliteOpenMode.ReadWriteCreate,
+                       Pooling = false
+                   }.ToString()))
+        {
+            await connection.OpenAsync(TestContext.Current.CancellationToken).ConfigureAwait(true);
+            using var command = connection.CreateCommand();
+            command.CommandText = "PRAGMA application_id = 1";
+            await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken).ConfigureAwait(true);
+        }
+
+        using var store = CreateStore();
+        await store.InitializeAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(8, await ReadSchemaVersionAsync());
+        Assert.Equal(1, await CountSchemaMigrationAsync(8));
+        Assert.Single(Directory.GetFiles(
+            Path.Combine(_directory, "Backup"),
+            "download.db.schema-v0-*.bak"));
     }
 
     [Fact]
@@ -55,6 +84,33 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
         Assert.Single(Directory.GetFiles(
             Path.Combine(_directory, "Backup"),
             "download.db.schema-v0-*.bak"));
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    public async Task InitializeUpgradesEveryRecognizedLegacyFormatDirectlyToCurrent(int version)
+    {
+        await CreateLegacyVersionDatabaseAsync(version);
+        using var store = CreateStore();
+
+        await store.InitializeAsync(TestContext.Current.CancellationToken);
+
+        var restored = Assert.Single(
+            await store.GetUnfinishedAsync(TestContext.Current.CancellationToken));
+        Assert.Equal($"legacy-v{version}", restored.Id.Value);
+        Assert.Equal(DownloadPhase.Paused, restored.Phase);
+        Assert.Equal("aria-gid", restored.Transfer.BackendIdentity);
+        Assert.Equal(8, await ReadSchemaVersionAsync());
+        Assert.Equal(1, await CountSchemaMigrationAsync(8));
+        Assert.Single(Directory.GetFiles(
+            Path.Combine(_directory, "Backup"),
+            $"download.db.schema-v{version}-*.bak"));
     }
 
     [Fact]
@@ -265,8 +321,7 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
             Assert.Single(await reopened.GetUnfinishedAsync(TestContext.Current.CancellationToken)).Id.Value);
         Assert.True(await reopened.IsLegacyUpgradeAdmissionBlockedAsync(
             TestContext.Current.CancellationToken));
-        Assert.Equal(1, await CountSchemaMigrationAsync(4));
-        Assert.Equal(1, await CountSchemaMigrationAsync(5));
+        Assert.Equal(1, await CountSchemaMigrationAsync(8));
     }
 
     [Fact]
@@ -551,19 +606,10 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
             Assert.True((await store.AddAsync(expected, TestContext.Current.CancellationToken)).IsSuccess);
         }
 
-        using (var connection = await OpenConnectionAsync(readOnly: false).ConfigureAwait(true))
+        await DowngradeCurrentDatabaseAsync(7).ConfigureAwait(true);
+        using (var connection = await OpenConnectionAsync(readOnly: true).ConfigureAwait(true))
         {
             using var command = connection.CreateCommand();
-            command.CommandText = """
-                ALTER TABLE download_base DROP COLUMN publishing_key;
-                ALTER TABLE download_base DROP COLUMN publishing_file_name;
-                ALTER TABLE download_base DROP COLUMN publishing_length;
-                ALTER TABLE download_base DROP COLUMN publishing_sha256;
-                DELETE FROM download_schema_migrations WHERE version = 8;
-                PRAGMA user_version = 7;
-                """;
-            await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken)
-                .ConfigureAwait(true);
             command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('download_base') WHERE name = 'publishing_key'";
             Assert.Equal(0L, await command.ExecuteScalarAsync(TestContext.Current.CancellationToken)
                 .ConfigureAwait(true));
@@ -594,7 +640,7 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
         Assert.Null(restored.Plan.NfoRequest);
         Assert.Equal(DownloadContentSelection.None, restored.Plan.RequestedContent);
         Assert.Equal(8, await ReadSchemaVersionAsync());
-        Assert.Equal(1, await CountSchemaMigrationAsync(5));
+        Assert.Equal(1, await CountSchemaMigrationAsync(8));
     }
 
     [Fact]
@@ -1710,21 +1756,7 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
             }
         }
 
-        using var connection = await OpenConnectionAsync(readOnly: false).ConfigureAwait(false);
-        using var command = connection.CreateCommand();
-        command.CommandText = """
-            ALTER TABLE download_base DROP COLUMN publishing_key;
-            ALTER TABLE download_base DROP COLUMN publishing_file_name;
-            ALTER TABLE download_base DROP COLUMN publishing_length;
-            ALTER TABLE download_base DROP COLUMN publishing_sha256;
-            ALTER TABLE download_base DROP COLUMN nfo_request;
-            ALTER TABLE download_base DROP COLUMN published_artifacts;
-            ALTER TABLE download_base DROP COLUMN staging_token;
-            DROP TABLE download_upgrade_admission_gate;
-            DELETE FROM download_schema_migrations WHERE version IN (4, 5, 6, 7, 8);
-            PRAGMA user_version = 3;
-            """;
-        await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
+        await DowngradeCurrentDatabaseAsync(3).ConfigureAwait(false);
     }
 
     private async Task InsertPreexistingQuarantineAsync(string id)
@@ -1889,53 +1921,151 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
 
     private async Task CreateVersionFourDatabaseAsync()
     {
-        Directory.CreateDirectory(_directory);
-        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        using (var store = CreateStore())
         {
-            DataSource = Path.Combine(_directory, "download.db"),
-            Mode = SqliteOpenMode.ReadWriteCreate,
-            Pooling = false
-        }.ToString());
-        await connection.OpenAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
+            Assert.True((await store.AddAsync(
+                CreatePausedTask(
+                    "version-four",
+                    "version-four-output",
+                    requestedContent: DownloadContentSelection.None),
+                TestContext.Current.CancellationToken).ConfigureAwait(false)).IsSuccess);
+        }
+
+        await DowngradeCurrentDatabaseAsync(4).ConfigureAwait(false);
+    }
+
+    private async Task CreateLegacyVersionDatabaseAsync(int version)
+    {
+        if (version is < 1 or > 7)
+        {
+            throw new ArgumentOutOfRangeException(nameof(version));
+        }
+
+        using (var store = CreateStore())
+        {
+            Assert.True((await store.AddAsync(
+                CreatePausedTask($"legacy-v{version}"),
+                TestContext.Current.CancellationToken).ConfigureAwait(false)).IsSuccess);
+        }
+
+        await DowngradeCurrentDatabaseAsync(version).ConfigureAwait(false);
+    }
+
+    private async Task DowngradeCurrentDatabaseAsync(int version)
+    {
+        using var connection = await OpenConnectionAsync(readOnly: false).ConfigureAwait(false);
         using var transaction = (SqliteTransaction)await connection
             .BeginTransactionAsync(TestContext.Current.CancellationToken)
             .ConfigureAwait(false);
-        await DownloadStoreSchemaV1Migration.ApplyAsync(
-            connection, transaction, _clock.UtcNow, TestContext.Current.CancellationToken)
-            .ConfigureAwait(false);
-        await DownloadStoreSchemaV2Migration.ApplyAsync(
-            connection, transaction, _clock.UtcNow, TestContext.Current.CancellationToken)
-            .ConfigureAwait(false);
-        await DownloadStoreSchemaV3Migration.ApplyAsync(
-            connection, transaction, _clock.UtcNow, TestContext.Current.CancellationToken)
-            .ConfigureAwait(false);
-        await DownloadStoreSchemaV4Migration.ApplyAsync(
-            connection,
-            transaction,
-            _clock.UtcNow,
-            new StubPhysicalOutputPathResolver(static path => path),
-            TestContext.Current.CancellationToken)
-            .ConfigureAwait(false);
-
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            INSERT INTO download_base
-                (id, need_download_content, bvid, avid, cid, main_title, name, resolution,
-                 file_path, version, created_at_utc, updated_at_utc)
-            VALUES
-                ('version-four', '{}', 'BV1V4', 1, 2, 'Version Four', 'Resume',
-                 '{"Name":"1080P","Id":80}', 'version-four-output', 0, 1, 1);
-            INSERT INTO downloading
-                (id, download_files, downloaded_files, play_stream_type, download_status,
-                 progress, max_speed, phase, bytes_per_second)
-            VALUES
-                ('version-four', '{}', '[]', 0, 3, 0, 0, @paused, 0);
-            PRAGMA user_version = 4;
+            ALTER TABLE download_base DROP COLUMN publishing_key;
+            ALTER TABLE download_base DROP COLUMN publishing_file_name;
+            ALTER TABLE download_base DROP COLUMN publishing_length;
+            ALTER TABLE download_base DROP COLUMN publishing_sha256;
             """;
-        command.Parameters.AddWithValue("@paused", (int)DownloadPhase.Paused);
+        await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        if (version < 7)
+        {
+            command.CommandText = "ALTER TABLE download_base DROP COLUMN staging_token";
+            await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
+        }
+
+        if (version < 6)
+        {
+            command.CommandText = "ALTER TABLE download_base DROP COLUMN published_artifacts";
+            await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
+        }
+
+        if (version < 5)
+        {
+            command.CommandText = "ALTER TABLE download_base DROP COLUMN nfo_request";
+            await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
+        }
+
+        if (version < 4)
+        {
+            command.CommandText = "DROP TABLE download_upgrade_admission_gate";
+            await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
+        }
+
+        if (version < 3)
+        {
+            command.CommandText = """
+                DROP INDEX ux_download_base_output_reservation;
+                DROP INDEX ix_download_base_file_path;
+                DROP INDEX ix_download_base_file_path_nocase;
+                ALTER TABLE download_base DROP COLUMN output_reservation_key;
+                """;
+            await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
+        }
+
+        if (version < 2)
+        {
+            command.CommandText = """
+                ALTER TABLE download_base DROP COLUMN version;
+                ALTER TABLE download_base DROP COLUMN created_at_utc;
+                ALTER TABLE download_base DROP COLUMN updated_at_utc;
+                ALTER TABLE downloading DROP COLUMN phase;
+                ALTER TABLE downloading DROP COLUMN failure_code;
+                ALTER TABLE downloading DROP COLUMN failure_message;
+                ALTER TABLE downloading DROP COLUMN failure_transient;
+                ALTER TABLE downloading DROP COLUMN downloaded_bytes;
+                ALTER TABLE downloading DROP COLUMN total_bytes;
+                ALTER TABLE downloading DROP COLUMN bytes_per_second;
+                """;
+            await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
+        }
+
+        command.CommandText = """
+            DELETE FROM download_schema_migrations;
+            WITH RECURSIVE versions(value) AS (
+                SELECT 1
+                UNION ALL
+                SELECT value + 1 FROM versions WHERE value < @version
+            )
+            INSERT INTO download_schema_migrations(version, applied_at_utc)
+            SELECT value, @applied_at_utc FROM versions;
+            """;
+        command.Parameters.AddWithValue("@version", version);
+        command.Parameters.AddWithValue("@applied_at_utc", _clock.UtcNow.ToUnixTimeMilliseconds());
+        await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
+        SetLegacyUserVersionCommandText(command, version);
         await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
         await transaction.CommitAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
+    }
+
+    private static void SetLegacyUserVersionCommandText(SqliteCommand command, int version)
+    {
+        command.Parameters.Clear();
+        switch (version)
+        {
+            case 1:
+                command.CommandText = "PRAGMA user_version = 1";
+                break;
+            case 2:
+                command.CommandText = "PRAGMA user_version = 2";
+                break;
+            case 3:
+                command.CommandText = "PRAGMA user_version = 3";
+                break;
+            case 4:
+                command.CommandText = "PRAGMA user_version = 4";
+                break;
+            case 5:
+                command.CommandText = "PRAGMA user_version = 5";
+                break;
+            case 6:
+                command.CommandText = "PRAGMA user_version = 6";
+                break;
+            case 7:
+                command.CommandText = "PRAGMA user_version = 7";
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(version));
+        }
     }
 
     private async Task ReplaceNfoRequestAsync(string id, string payload)
