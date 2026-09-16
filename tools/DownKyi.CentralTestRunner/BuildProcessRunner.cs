@@ -48,25 +48,39 @@ internal static class BuildProcessRunner
         ProcessStartInfo startInfo,
         CancellationToken cancellationToken,
         TimeSpan? cleanupTimeout = null,
-        string? cleanupResourceDirectory = null)
+        string? cleanupResourceDirectory = null,
+        Func<int, TimeSpan, Task<FinalProcessSnapshot>>? captureSnapshotAsync = null)
     {
-        using var process = new Process { StartInfo = startInfo };
-        process.Start();
+        var cleanupWindow = cleanupTimeout ?? TimeSpan.FromSeconds(5);
+        using var scope = await OwnedProcessScope.StartAsync(startInfo, cleanupWindow)
+            .ConfigureAwait(false);
+        var process = scope.Host;
+        var outputTask = ForwardOutputAsync(process.StandardOutput, Console.Out);
+        var errorTask = ForwardOutputAsync(process.StandardError, Console.Error);
         try
         {
             await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            var cleanupWindow = cleanupTimeout ?? TimeSpan.FromSeconds(5);
             await CleanupAfterCancellationAsync(
-                process,
+                scope,
                 cleanupWindow,
-                cleanupResourceDirectory: cleanupResourceDirectory).ConfigureAwait(false);
+                captureSnapshotAsync,
+                cleanupResourceDirectory,
+                outputTask,
+                errorTask).ConfigureAwait(false);
             throw;
         }
 
-        return process.ExitCode;
+        var exitCode = process.ExitCode;
+        await ReleaseScopeAsync(
+            scope,
+            new CleanupDeadline(cleanupWindow),
+            cleanupResourceDirectory,
+            outputTask,
+            errorTask).ConfigureAwait(false);
+        return exitCode;
     }
 
     [SuppressMessage(
@@ -74,18 +88,38 @@ internal static class BuildProcessRunner
         "CA1031:Do not catch general exception types",
         Justification = "A diagnostic failure must be retained while mandatory process termination still runs.")]
     internal static async Task CleanupAfterCancellationAsync(
-        Process process,
+        OwnedProcessScope scope,
         TimeSpan cleanupWindow,
         Func<int, TimeSpan, Task<FinalProcessSnapshot>>? captureSnapshotAsync = null,
         string? cleanupResourceDirectory = null)
     {
+        await CleanupAfterCancellationAsync(
+            scope,
+            cleanupWindow,
+            captureSnapshotAsync,
+            cleanupResourceDirectory,
+            outputTask: null,
+            errorTask: null).ConfigureAwait(false);
+    }
+
+    [SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "A diagnostic failure must be retained while mandatory process termination still runs.")]
+    private static async Task CleanupAfterCancellationAsync(
+        OwnedProcessScope scope,
+        TimeSpan cleanupWindow,
+        Func<int, TimeSpan, Task<FinalProcessSnapshot>>? captureSnapshotAsync,
+        string? cleanupResourceDirectory,
+        Task? outputTask,
+        Task? errorTask)
+    {
         var deadline = new CleanupDeadline(cleanupWindow);
         var captureSnapshot = captureSnapshotAsync ?? ProcessTreeSnapshot.CaptureAsync;
-        FinalProcessSnapshot? ownedProcesses = null;
         ExceptionDispatchInfo? snapshotFailure = null;
         try
         {
-            ownedProcesses = await Task.Run(() => captureSnapshot(process.Id, deadline.SnapshotWindow))
+            await Task.Run(() => captureSnapshot(scope.RootPid, deadline.SnapshotWindow))
                 .WaitAsync(deadline.SnapshotWindow).ConfigureAwait(false);
         }
         catch (Exception exception)
@@ -95,21 +129,12 @@ internal static class BuildProcessRunner
 
         try
         {
-            await Task.Run(() => KillOwnedProcessTree(process))
-                .WaitAsync(deadline.Remaining).ConfigureAwait(false);
-            await WaitForRootExitAsync(process, deadline.Remaining).ConfigureAwait(false);
-            if (ownedProcesses is not null)
-            {
-                await WaitForOwnedProcessesToExitAsync(ownedProcesses.Processes, deadline.Remaining)
-                    .ConfigureAwait(false);
-            }
-
-            if (OperatingSystem.IsWindows() && cleanupResourceDirectory is not null)
-            {
-                await WindowsDirectoryResourceRundown.WaitForDeleteAccessAsync(
-                    cleanupResourceDirectory,
-                    deadline.Remaining).ConfigureAwait(false);
-            }
+            await ReleaseScopeAsync(
+                scope,
+                deadline,
+                cleanupResourceDirectory,
+                outputTask,
+                errorTask).ConfigureAwait(false);
         }
         catch (Exception cleanupFailure) when (snapshotFailure is not null)
         {
@@ -121,6 +146,43 @@ internal static class BuildProcessRunner
         }
 
         snapshotFailure?.Throw();
+    }
+
+    private static async Task ReleaseScopeAsync(
+        OwnedProcessScope scope,
+        CleanupDeadline deadline,
+        string? cleanupResourceDirectory,
+        Task? outputTask,
+        Task? errorTask)
+    {
+        await scope.TerminateAsync(deadline).ConfigureAwait(false);
+        if (outputTask is not null && errorTask is not null)
+        {
+            await Task.WhenAll(outputTask, errorTask)
+                .WaitAsync(deadline.Remaining).ConfigureAwait(false);
+        }
+
+        if (OperatingSystem.IsWindows() && cleanupResourceDirectory is not null)
+        {
+            await WindowsDirectoryResourceRundown.WaitForDeleteAccessAsync(
+                cleanupResourceDirectory,
+                deadline.Remaining).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task ForwardOutputAsync(StreamReader source, TextWriter destination)
+    {
+        var buffer = new char[4096];
+        while (true)
+        {
+            var count = await source.ReadAsync(buffer.AsMemory()).ConfigureAwait(false);
+            if (count == 0)
+            {
+                return;
+            }
+
+            await destination.WriteAsync(buffer.AsMemory(0, count)).ConfigureAwait(false);
+        }
     }
 
     internal static void KillOwnedProcessTree(Process process)
