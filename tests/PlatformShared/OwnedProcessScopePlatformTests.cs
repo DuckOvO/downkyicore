@@ -329,7 +329,9 @@ public sealed class OwnedProcessScopePlatformTests
     {
         var directory = Path.Combine(Path.GetTempPath(), $"downkyi-build-tree-{Guid.NewGuid():N}");
         Directory.CreateDirectory(directory);
-        Process? root = null;
+        CancellationTokenSource? cancellation = null;
+        Task<int>? build = null;
+        int? rootPid = null;
         int? childPid = null;
         int? grandchildPid = null;
         try
@@ -344,32 +346,57 @@ public sealed class OwnedProcessScopePlatformTests
             startInfo.ArgumentList.Add("fixture-tree-root");
             startInfo.ArgumentList.Add(runtimeConfig);
             startInfo.ArgumentList.Add(directory);
-            root = Process.Start(startInfo)
-                ?? throw new InvalidOperationException("The build-tree fixture did not start.");
+            var snapshotFailure = new IOException("snapshot unavailable");
+            cancellation = new CancellationTokenSource();
+            build = BuildProcessRunner.RunAsync(
+                startInfo,
+                cancellation.Token,
+                TimeSpan.FromSeconds(5),
+                captureSnapshotAsync: (_, _) => Task.FromException<FinalProcessSnapshot>(snapshotFailure));
+            rootPid = await ReadMarkerAsync(Path.Combine(directory, "root.pid")).ConfigureAwait(true);
             childPid = await ReadMarkerAsync(Path.Combine(directory, "child.pid")).ConfigureAwait(true);
             grandchildPid = await ReadMarkerAsync(Path.Combine(directory, "grandchild.pid")).ConfigureAwait(true);
 
-            var snapshotFailure = new IOException("snapshot unavailable");
+            if (OperatingSystem.IsLinux())
+            {
+                var ownerPid = ReadLinuxParentPid(rootPid.Value);
+                Assert.True(ownerPid > 0);
+                Assert.Equal(ownerPid, GetProcessGroup(rootPid.Value));
+                Assert.Equal(rootPid, ReadLinuxParentPid(childPid.Value));
+                Assert.Equal(childPid, ReadLinuxParentPid(grandchildPid.Value));
+            }
+
             var clock = Stopwatch.StartNew();
-            var failure = await Record.ExceptionAsync(() => BuildProcessRunner.CleanupAfterCancellationAsync(
-                root, TimeSpan.FromSeconds(5),
-                (_, _) => Task.FromException<FinalProcessSnapshot>(snapshotFailure))).ConfigureAwait(true);
+            await cancellation.CancelAsync().ConfigureAwait(true);
+            var failure = await Record.ExceptionAsync(() => build).ConfigureAwait(true);
             clock.Stop();
 
             Assert.Same(snapshotFailure, failure);
             Assert.True(clock.Elapsed < TimeSpan.FromSeconds(5));
-            AssertStopped(root.Id);
+            AssertStopped(rootPid.Value);
             AssertStopped(childPid.Value);
             AssertStopped(grandchildPid.Value);
+            if (OperatingSystem.IsLinux())
+            {
+                Assert.Null(ReadLinuxStateCode(rootPid.Value));
+                Assert.Null(ReadLinuxStateCode(childPid.Value));
+                Assert.Null(ReadLinuxStateCode(grandchildPid.Value));
+            }
         }
         finally
         {
-            if (root is { HasExited: false })
+            if (build is { IsCompleted: false } && cancellation is not null)
             {
-                root.Kill(entireProcessTree: true);
+                await cancellation.CancelAsync().ConfigureAwait(true);
             }
 
-            root?.Dispose();
+            if (build is not null)
+            {
+                _ = await Record.ExceptionAsync(() => build).ConfigureAwait(true);
+            }
+
+            cancellation?.Dispose();
+            StopIfAlive(rootPid);
             StopIfAlive(childPid);
             StopIfAlive(grandchildPid);
             if (OperatingSystem.IsWindows())
@@ -378,6 +405,24 @@ public sealed class OwnedProcessScopePlatformTests
                     directory, TimeSpan.FromSeconds(3)).ConfigureAwait(true);
             }
             Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static int? ReadLinuxParentPid(int pid)
+    {
+        try
+        {
+            var parentLine = File.ReadLines($"/proc/{pid}/status")
+                .FirstOrDefault(line => line.StartsWith("PPid:", StringComparison.Ordinal));
+            var fields = parentLine?.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries);
+            return fields is { Length: > 1 } &&
+                   int.TryParse(fields[1], NumberStyles.None, CultureInfo.InvariantCulture, out var parentPid)
+                ? parentPid
+                : null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
         }
     }
 

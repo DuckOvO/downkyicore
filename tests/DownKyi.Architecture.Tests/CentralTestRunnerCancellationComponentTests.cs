@@ -20,6 +20,35 @@ public sealed class CentralTestRunnerCancellationComponentTests
     }
 
     [Fact]
+    public async Task BuildRunnerReturnsTheOwnedChildExitCodeOnNormalCompletion()
+    {
+        var exitCode = await BuildProcessRunner.RunAsync(
+            CreateFixtureStartInfo("fixture-pass"),
+            TestContext.Current.CancellationToken,
+            TestTimeout).ConfigureAwait(true);
+
+        Assert.Equal(0, exitCode);
+    }
+
+    [Fact]
+    public async Task BuildRunnerReportsOwnedChildStartupFailure()
+    {
+        var startInfo = new ProcessStartInfo(
+            Path.Combine(Path.GetTempPath(), $"missing-build-{Guid.NewGuid():N}"))
+        {
+            UseShellExecute = false
+        };
+
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => BuildProcessRunner.RunAsync(
+                startInfo,
+                TestContext.Current.CancellationToken,
+                TestTimeout)).ConfigureAwait(true);
+
+        Assert.Contains("did not launch", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task IdentityObservationReadsStartTimeBeforeWaitingForExit()
     {
         Process? fixture = null;
@@ -255,26 +284,26 @@ public sealed class CentralTestRunnerCancellationComponentTests
     [Fact]
     public async Task BuildSnapshotNeverReturnsDoesNotBlockTermination()
     {
-        Process? fixture = null;
+        OwnedProcessScope? scope = null;
         await FailurePreservingTestCleanup.RunAsync(
             async () =>
             {
-                fixture = await StartHoldingFixtureAsync().ConfigureAwait(true);
+                scope = await StartHoldingScopeAsync().ConfigureAwait(true);
                 var clock = Stopwatch.StartNew();
                 var failure = await Record.ExceptionAsync(
                     () => BuildProcessRunner.CleanupAfterCancellationAsync(
-                        fixture,
+                        scope,
                         TimeSpan.FromSeconds(2),
                         (_, _) => new TaskCompletionSource<FinalProcessSnapshot>().Task))
                     .ConfigureAwait(true);
                 clock.Stop();
 
                 Assert.True(failure is TimeoutException,
-                    $"cleanup result={failure?.GetType().Name ?? "success"}, elapsed={clock.Elapsed}, root exited={fixture.HasExited}");
+                    $"cleanup result={failure?.GetType().Name ?? "success"}, elapsed={clock.Elapsed}, host exited={scope.Host.HasExited}");
                 Assert.True(clock.Elapsed < TimeSpan.FromMilliseconds(2500));
-                Assert.True(fixture.HasExited);
+                Assert.True(scope.Host.HasExited);
             },
-            () => StopFixtureAsync(fixture)).ConfigureAwait(true);
+            () => StopScopeAsync(scope)).ConfigureAwait(true);
     }
 
     [Fact]
@@ -440,29 +469,29 @@ public sealed class CentralTestRunnerCancellationComponentTests
         var fixtureDirectory = Path.Combine(
             Path.GetTempPath(),
             $"downkyi-central-runner-filesystem-{Guid.NewGuid():N}");
-        Process? fixture = null;
+        OwnedProcessScope? scope = null;
         Directory.CreateDirectory(fixtureDirectory);
         await FailurePreservingTestCleanup.RunAsync(
             async () =>
             {
                 var startInfo = CreateFixtureStartInfo("fixture-hold");
                 startInfo.WorkingDirectory = fixtureDirectory;
-                fixture = await StartFixtureAsync(startInfo).ConfigureAwait(true);
+                scope = await StartHoldingScopeAsync(startInfo).ConfigureAwait(true);
 
                 await BuildProcessRunner.CleanupAfterCancellationAsync(
-                    fixture,
+                    scope,
                     TestTimeout,
                     cleanupResourceDirectory: fixtureDirectory)
                     .ConfigureAwait(true);
-                fixture.Dispose();
-                fixture = null;
+                scope.Dispose();
+                scope = null;
                 Directory.Delete(fixtureDirectory);
 
                 Assert.False(Directory.Exists(fixtureDirectory));
             },
             async () =>
             {
-                await StopFixtureAsync(fixture).ConfigureAwait(true);
+                await StopScopeAsync(scope).ConfigureAwait(true);
                 if (Directory.Exists(fixtureDirectory))
                 {
                     Directory.Delete(fixtureDirectory);
@@ -472,23 +501,23 @@ public sealed class CentralTestRunnerCancellationComponentTests
 
     private static async Task AssertSnapshotFailureStillKillsAsync(Exception snapshotFailure)
     {
-        Process? fixture = null;
+        OwnedProcessScope? scope = null;
         await FailurePreservingTestCleanup.RunAsync(
             async () =>
             {
-                fixture = await StartHoldingFixtureAsync().ConfigureAwait(true);
+                scope = await StartHoldingScopeAsync().ConfigureAwait(true);
 
                 var observedFailure = await Record.ExceptionAsync(
                     () => BuildProcessRunner.CleanupAfterCancellationAsync(
-                        fixture,
+                        scope,
                         TestTimeout,
                         (_, _) => Task.FromException<FinalProcessSnapshot>(snapshotFailure)))
                     .ConfigureAwait(true);
 
                 Assert.Same(snapshotFailure, observedFailure);
-                Assert.True(fixture.HasExited);
+                Assert.True(scope.Host.HasExited);
             },
-            () => StopFixtureAsync(fixture)).ConfigureAwait(true);
+            () => StopScopeAsync(scope)).ConfigureAwait(true);
     }
 
     private static ObservedProcess CreateObservedProcess(Process process, DateTimeOffset startTimeUtc)
@@ -514,6 +543,26 @@ public sealed class CentralTestRunnerCancellationComponentTests
     private static Task<Process> StartHoldingFixtureAsync()
     {
         return StartFixtureAsync(CreateFixtureStartInfo("fixture-hold"));
+    }
+
+    private static async Task<OwnedProcessScope> StartHoldingScopeAsync(ProcessStartInfo? startInfo = null)
+    {
+        var scope = await OwnedProcessScope.StartAsync(
+            startInfo ?? CreateFixtureStartInfo("fixture-hold"),
+            TestTimeout).ConfigureAwait(false);
+        try
+        {
+            var readyLine = await scope.Host.StandardOutput.ReadLineAsync()
+                .WaitAsync(TestTimeout, TestContext.Current.CancellationToken)
+                .ConfigureAwait(false);
+            Assert.StartsWith("fixture-ready pid=", readyLine, StringComparison.Ordinal);
+            return scope;
+        }
+        catch
+        {
+            await StopScopeAsync(scope).ConfigureAwait(false);
+            throw;
+        }
     }
 
     private static async Task<Process> StartFixtureAsync(ProcessStartInfo startInfo)
@@ -573,6 +622,19 @@ public sealed class CentralTestRunnerCancellationComponentTests
             }
 
             await process.WaitForExitAsync().WaitAsync(TestTimeout).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task StopScopeAsync(OwnedProcessScope? scope)
+    {
+        if (scope is null)
+        {
+            return;
+        }
+
+        using (scope)
+        {
+            await scope.TerminateAsync(new CleanupDeadline(TestTimeout)).ConfigureAwait(false);
         }
     }
 }
