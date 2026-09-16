@@ -203,8 +203,11 @@ public sealed class DownloadPipelineCommitBoundaryTests
             var settings = new SettingsStore(Path.Combine(directory, "settings.json"));
             var store = new CommitBoundaryStore(rejectCompletion, rejectPublishingStart);
             var clock = new SystemClock();
-            var tasks = new DownloadTaskApplicationService(store, clock);
-            var projectionStore = new DownloadTaskProjectionStore(tasks, clock);
+            var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+            var projectionStore = new DownloadTaskProjectionStore(
+                tasks,
+                new DownloadHistoryService(store, store),
+                clock);
             var stateWriter = new DownloadTaskStateWriter(tasks);
             var taskId = new DownloadTaskId(Guid.NewGuid().ToString("N"));
             var downloadBase = new DownloadBase
@@ -335,7 +338,7 @@ public sealed class DownloadPipelineCommitBoundaryTests
 
     private sealed class CommitBoundaryStore(
         bool rejectCompletion,
-        bool rejectPublishingStart) : IDownloadTaskStore
+        bool rejectPublishingStart) : IDownloadTaskStore, IDownloadHistoryStore
     {
         public DownloadTask? Current { get; private set; }
 

@@ -40,8 +40,11 @@ public sealed class DownloadTaskProjectionStoreResumeTests : IDisposable
                    new SystemClock()))
         {
             var clock = new SystemClock();
-            using var tasks = new DownloadTaskApplicationService(store, clock);
-            using var storage = new DownloadTaskProjectionStore(tasks, clock);
+            using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+            using var storage = new DownloadTaskProjectionStore(
+                tasks,
+                new DownloadHistoryService(store, store),
+                clock);
             var stateWriter = new DownloadTaskStateWriter(tasks);
             await storage.AddDownloadingAsync(item, TestContext.Current.CancellationToken);
             var id = new DownloadTaskId(taskId);
@@ -81,8 +84,11 @@ public sealed class DownloadTaskProjectionStoreResumeTests : IDisposable
                    new SystemClock()))
         {
             var clock = new SystemClock();
-            using var tasks = new DownloadTaskApplicationService(store, clock);
-            using var reopenedStorage = new DownloadTaskProjectionStore(tasks, clock);
+            using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+            using var reopenedStorage = new DownloadTaskProjectionStore(
+                tasks,
+                new DownloadHistoryService(store, store),
+                clock);
             var restored = Assert.Single(
                 await reopenedStorage.GetDownloadingAsync(TestContext.Current.CancellationToken));
             Assert.Equal(ariaGid, restored.Downloading.Gid);
@@ -141,8 +147,11 @@ public sealed class DownloadTaskProjectionStoreResumeTests : IDisposable
                    new SystemClock()))
         {
             var clock = new SystemClock();
-            using var tasks = new DownloadTaskApplicationService(store, clock);
-            using var storage = new DownloadTaskProjectionStore(tasks, clock);
+            using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+            using var storage = new DownloadTaskProjectionStore(
+                tasks,
+                new DownloadHistoryService(store, store),
+                clock);
             var stateWriter = new DownloadTaskStateWriter(tasks);
             await storage.AddDownloadingAsync(downloadingItem, TestContext.Current.CancellationToken);
             var id = new DownloadTaskId(downloadingItem.DownloadBase.Id);
@@ -161,8 +170,11 @@ public sealed class DownloadTaskProjectionStoreResumeTests : IDisposable
             new SqliteDownloadTaskStoreOptions(database),
             new SystemClock());
         var reopenedClock = new SystemClock();
-        using var reopenedTasks = new DownloadTaskApplicationService(reopenedStore, reopenedClock);
-        using var reopened = new DownloadTaskProjectionStore(reopenedTasks, reopenedClock);
+        using var reopenedTasks = new DownloadTaskApplicationService(reopenedStore, new DownloadHistoryService(reopenedStore, reopenedStore), reopenedClock);
+        using var reopened = new DownloadTaskProjectionStore(
+            reopenedTasks,
+            new DownloadHistoryService(reopenedStore, reopenedStore),
+            reopenedClock);
         Assert.Empty(await reopened.GetDownloadingAsync(TestContext.Current.CancellationToken));
         var restored = Assert.Single(
             await reopened.GetDownloadedAsync(TestContext.Current.CancellationToken));
@@ -193,8 +205,11 @@ public sealed class DownloadTaskProjectionStoreResumeTests : IDisposable
             new SqliteDownloadTaskStoreOptions(database),
             new SystemClock());
         var clock = new SystemClock();
-        using var tasks = new DownloadTaskApplicationService(store, clock);
-        using var storage = new DownloadTaskProjectionStore(tasks, clock);
+        using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+        using var storage = new DownloadTaskProjectionStore(
+            tasks,
+            new DownloadHistoryService(store, store),
+            clock);
         var stateWriter = new DownloadTaskStateWriter(tasks);
         await storage.AddDownloadingAsync(item, TestContext.Current.CancellationToken);
         var notifications = new List<string?>();

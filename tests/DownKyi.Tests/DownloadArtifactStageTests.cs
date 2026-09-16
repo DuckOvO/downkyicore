@@ -112,8 +112,11 @@ public sealed class DownloadArtifactStageTests
             using (var firstStore = CreateSqliteStore(databasePath))
             {
                 await firstStore.InitializeAsync(TestContext.Current.CancellationToken);
-                using var firstTasks = new DownloadTaskApplicationService(firstStore, new SystemClock());
-                using var firstProjections = new DownloadTaskProjectionStore(firstTasks, new SystemClock());
+                using var firstTasks = new DownloadTaskApplicationService(firstStore, new DownloadHistoryService(firstStore, firstStore), new SystemClock());
+                using var firstProjections = new DownloadTaskProjectionStore(
+                    firstTasks,
+                    new DownloadHistoryService(firstStore, firstStore),
+                    new SystemClock());
                 await firstProjections.AddDownloadingAsync(
                     admitted,
                     TestContext.Current.CancellationToken);
@@ -132,8 +135,11 @@ public sealed class DownloadArtifactStageTests
             });
             using var reopenedStore = CreateSqliteStore(databasePath);
             await reopenedStore.InitializeAsync(TestContext.Current.CancellationToken);
-            using var reopenedTasks = new DownloadTaskApplicationService(reopenedStore, new SystemClock());
-            using var reopenedProjections = new DownloadTaskProjectionStore(reopenedTasks, new SystemClock());
+            using var reopenedTasks = new DownloadTaskApplicationService(reopenedStore, new DownloadHistoryService(reopenedStore, reopenedStore), new SystemClock());
+            using var reopenedProjections = new DownloadTaskProjectionStore(
+                reopenedTasks,
+                new DownloadHistoryService(reopenedStore, reopenedStore),
+                new SystemClock());
             var startup = await reopenedProjections.GetDownloadingStateAsync(
                 TestContext.Current.CancellationToken);
             var reopenedItem = Assert.Single(startup.Projections);
@@ -865,8 +871,11 @@ public sealed class DownloadArtifactStageTests
                 };
             }
             var store = new SingleTaskStore();
-            var tasks = new DownloadTaskApplicationService(store, new SystemClock());
-            var projections = new DownloadTaskProjectionStore(tasks, new SystemClock());
+            var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), new SystemClock());
+            var projections = new DownloadTaskProjectionStore(
+                tasks,
+                new DownloadHistoryService(store, store),
+                new SystemClock());
             var stateWriter = new DownloadTaskStateWriter(tasks);
             await projections.AddDownloadingAsync(
                 downloading,
@@ -906,7 +915,7 @@ public sealed class DownloadArtifactStageTests
         }
     }
 
-    private sealed class SingleTaskStore : IDownloadTaskStore
+    private sealed class SingleTaskStore : IDownloadTaskStore, IDownloadHistoryStore
     {
         private DownloadTask? _task;
 

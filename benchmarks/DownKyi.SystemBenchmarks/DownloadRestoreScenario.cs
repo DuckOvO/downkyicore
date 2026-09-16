@@ -20,8 +20,11 @@ internal static class DownloadRestoreScenario
         var store = new SqliteDownloadTaskStore(
             new SqliteDownloadTaskStoreOptions(databasePath),
             clock);
-        var tasks = new DownloadTaskApplicationService(store, clock);
-        var projection = new DownloadTaskProjectionStore(tasks, clock);
+        var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+        var projection = new DownloadTaskProjectionStore(
+            tasks,
+            new DownloadHistoryService(store, store),
+            clock);
         try
         {
             await store.InitializeAsync(cancellationToken).ConfigureAwait(false);

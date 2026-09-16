@@ -119,8 +119,11 @@ public sealed class DownloadShutdownCoordinatorTests
                 new SqliteDownloadTaskStoreOptions(databasePath),
                 new SystemClock());
             var clock = new SystemClock();
-            using var tasks = new DownloadTaskApplicationService(store, clock);
-            using var projections = new DownloadTaskProjectionStore(tasks, clock);
+            using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+            using var projections = new DownloadTaskProjectionStore(
+                tasks,
+                new DownloadHistoryService(store, store),
+                clock);
             var stateWriter = new DownloadTaskStateWriter(tasks);
             var item = new DownloadingItem
             {

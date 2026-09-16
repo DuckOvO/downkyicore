@@ -9,15 +9,21 @@ public sealed partial class DownloadTaskApplicationService : IDownloadTaskApplic
 {
     private const int MaximumUpdateAttempts = 2;
     private readonly IDownloadTaskStore _store;
+    private readonly IDownloadHistoryService _history;
     private readonly IClock _clock;
     private readonly ConcurrentDictionary<DownloadTaskId, SemaphoreSlim> _taskGates = new();
     private bool _disposed;
 
-    public DownloadTaskApplicationService(IDownloadTaskStore store, IClock clock)
+    public DownloadTaskApplicationService(
+        IDownloadTaskStore store,
+        IDownloadHistoryService history,
+        IClock clock)
     {
         ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(history);
         ArgumentNullException.ThrowIfNull(clock);
         _store = store;
+        _history = history;
         _clock = clock;
     }
 
@@ -57,15 +63,6 @@ public sealed partial class DownloadTaskApplicationService : IDownloadTaskApplic
         return OperationResult.Success(task);
     }
 
-    public Task<OperationResult> AddHistoryAsync(
-        DownloadHistoryRecord history,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(history);
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        return _store.AddHistoryAsync(history, cancellationToken);
-    }
-
     public async Task<OperationResult> CheckNewDownloadAdmissionAsync(
         CancellationToken cancellationToken)
     {
@@ -102,15 +99,6 @@ public sealed partial class DownloadTaskApplicationService : IDownloadTaskApplic
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         return _store.ConfirmLegacyRemoteTasksStoppedAsync(cancellationToken);
-    }
-
-    public Task<DownloadHistoryPage> GetHistoryPageAsync(
-        DownloadHistoryCursor? cursor,
-        int pageSize,
-        CancellationToken cancellationToken)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        return _store.GetHistoryPageAsync(cursor, pageSize, cancellationToken);
     }
 
     public Task<OperationResult<DownloadTask>> StartAsync(
@@ -363,30 +351,6 @@ public sealed partial class DownloadTaskApplicationService : IDownloadTaskApplic
         CancellationToken cancellationToken) =>
         MutateAsync(taskId, static (task, now) => task.Delete(now), cancellationToken);
 
-    public Task<OperationResult> DeleteHistoryAsync(
-        DownloadTaskId taskId,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(taskId);
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        return _store.DeleteHistoryAsync(taskId, cancellationToken);
-    }
-
-    public async Task<OperationResult> ClearHistoryAsync(CancellationToken cancellationToken)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        var result = await _store.ClearHistoryAsync(cancellationToken).ConfigureAwait(false);
-        if (result.IsSuccess)
-        {
-            TaskChanged?.Invoke(this, new DownloadTaskChangedEventArgs(
-                new DownloadTaskId("history"),
-                null,
-                DownloadTaskChangeKind.HistoryCleared));
-        }
-
-        return result;
-    }
-
     public void Dispose()
     {
         if (_disposed)
@@ -451,9 +415,8 @@ public sealed partial class DownloadTaskApplicationService : IDownloadTaskApplic
                 }
 
                 var storeResult = updated.Phase == DownloadPhase.Completed
-                    ? await _store.CompleteAsync(
+                    ? await _history.CompleteAsync(
                             updated,
-                            DownloadHistoryRecord.FromCompletedTask(updated),
                             current.Version,
                             cancellationToken)
                         .ConfigureAwait(false)

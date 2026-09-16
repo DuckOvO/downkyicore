@@ -206,8 +206,11 @@ public sealed class MuxFailureRecoveryTests
             var settings = new TestSettingsStore();
             var store = new SingleTaskStore();
             var clock = new SystemClock();
-            var tasks = new DownloadTaskApplicationService(store, clock);
-            var projectionStore = new DownloadTaskProjectionStore(tasks, clock);
+            var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+            var projectionStore = new DownloadTaskProjectionStore(
+                tasks,
+                new DownloadHistoryService(store, store),
+                clock);
             var stateWriter = new DownloadTaskStateWriter(tasks);
             var taskId = new DownloadTaskId("mux-recovery");
             var downloadBase = new DownloadBase
@@ -383,7 +386,7 @@ public sealed class MuxFailureRecoveryTests
 
     private sealed record DurlTestSource(int Order, string TransferKey, string FilePath);
 
-    private sealed class SingleTaskStore : IDownloadTaskStore
+    private sealed class SingleTaskStore : IDownloadTaskStore, IDownloadHistoryStore
     {
         private DownloadTask? _task;
 

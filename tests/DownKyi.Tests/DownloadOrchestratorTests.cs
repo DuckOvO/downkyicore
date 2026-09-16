@@ -231,7 +231,7 @@ public sealed class DownloadOrchestratorTests
 
         public OrchestratorContext()
         {
-            Tasks = new DownloadTaskApplicationService(_store, new SystemClock());
+            Tasks = new DownloadTaskApplicationService(_store, new DownloadHistoryService(_store, _store), new SystemClock());
             StateWriter = new DownloadTaskStateWriter(Tasks);
         }
 
@@ -328,7 +328,7 @@ public sealed class DownloadOrchestratorTests
         }
     }
 
-    private sealed class InMemoryDownloadTaskStore : IDownloadTaskStore
+    private sealed class InMemoryDownloadTaskStore : IDownloadTaskStore, IDownloadHistoryStore
     {
         private readonly Lock _sync = new();
         private readonly Dictionary<DownloadTaskId, DownloadTask> _tasks = [];

@@ -384,8 +384,11 @@ public sealed class VideoTagLoadingTests : IDisposable
             });
             Store = new RecordingDownloadTaskStore();
             var clock = new SystemClock();
-            _taskService = new DownloadTaskApplicationService(Store, clock);
-            _projectionStore = new DownloadTaskProjectionStore(_taskService, clock);
+            _taskService = new DownloadTaskApplicationService(Store, new DownloadHistoryService(Store, Store), clock);
+            _projectionStore = new DownloadTaskProjectionStore(
+                _taskService,
+                new DownloadHistoryService(Store, Store),
+                clock);
             ListState = new DownloadListState();
             Queue = new RecordingDownloadTaskQueue();
             Logger = new RecordingLogger<DownloadMovieMetadataBuilder>();
@@ -552,7 +555,7 @@ public sealed class VideoTagLoadingTests : IDisposable
         }
     }
 
-    private sealed class RecordingDownloadTaskStore : IDownloadTaskStore
+    private sealed class RecordingDownloadTaskStore : IDownloadTaskStore, IDownloadHistoryStore
     {
         public int AddCount { get; private set; }
 

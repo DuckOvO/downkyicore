@@ -9,10 +9,6 @@ public interface IDownloadTaskStore
 
     Task<OperationResult> AddAsync(DownloadTask task, CancellationToken cancellationToken);
 
-    Task<OperationResult> AddHistoryAsync(
-        DownloadHistoryRecord history,
-        CancellationToken cancellationToken);
-
     Task<OperationResult> UpdateAsync(
         DownloadTask task,
         long expectedVersion,
@@ -48,18 +44,7 @@ public interface IDownloadTaskStore
         CancellationToken cancellationToken) =>
         Task.FromResult(OperationResult.Success());
 
-    Task<DownloadHistoryPage> GetHistoryPageAsync(
-        DownloadHistoryCursor? cursor,
-        int pageSize,
-        CancellationToken cancellationToken);
-
     Task<OperationResult> DeleteAsync(DownloadTaskId taskId, CancellationToken cancellationToken);
-
-    Task<OperationResult> DeleteHistoryAsync(
-        DownloadTaskId taskId,
-        CancellationToken cancellationToken);
-
-    Task<OperationResult> ClearHistoryAsync(CancellationToken cancellationToken);
 
     Task<IReadOnlyList<QuarantinedDownloadRecord>> GetQuarantinedRecordsAsync(
         CancellationToken cancellationToken);

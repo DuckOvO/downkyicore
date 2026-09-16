@@ -48,8 +48,13 @@ public sealed class SqliteDownloadTaskStoreArchitectureTests
     {
         ["InitializeAsync"] = "_database.InitializeAsync(cancellationToken)",
         ["AddAsync"] = "await _outputReservations.AddAsync(task, cancellationToken).ConfigureAwait(false)",
+        ["AddHistoryAsync"] =
+            "await _commands.AddHistoryAsync(history, cancellationToken).ConfigureAwait(false)",
         ["UpdateAsync"] =
             "await _commands.UpdateAsync(task, expectedVersion, cancellationToken).ConfigureAwait(false)",
+        ["CompleteAsync"] =
+            "await _commands.CompleteAsync(task, history, expectedVersion, cancellationToken)" +
+            ".ConfigureAwait(false)",
         ["UpdateProgressAsync"] =
             "await _commands.UpdateProgressAsync(progressWrite, cancellationToken).ConfigureAwait(false)",
         ["FindAsync"] = "await _queries.FindAsync(taskId, cancellationToken).ConfigureAwait(false)",
@@ -64,6 +69,8 @@ public sealed class SqliteDownloadTaskStoreArchitectureTests
         ["GetHistoryPageAsync"] =
             "await _queries.GetHistoryPageAsync(cursor, pageSize, cancellationToken).ConfigureAwait(false)",
         ["DeleteAsync"] = "await _commands.DeleteAsync(taskId, cancellationToken).ConfigureAwait(false)",
+        ["DeleteHistoryAsync"] =
+            "await _commands.DeleteHistoryAsync(taskId, cancellationToken).ConfigureAwait(false)",
         ["ClearHistoryAsync"] =
             "await _commands.ClearHistoryAsync(cancellationToken).ConfigureAwait(false)",
         ["GetQuarantinedRecordsAsync"] =
@@ -89,7 +96,11 @@ public sealed class SqliteDownloadTaskStoreArchitectureTests
     {
         var source = ReadDownloadSource(FacadeFile);
 
-        Assert.Contains("public sealed class SqliteDownloadTaskStore", source, StringComparison.Ordinal);
+        Assert.Contains(
+            "public sealed class SqliteDownloadTaskStore : " +
+            "IDownloadTaskStore, IDownloadHistoryStore, IDisposable",
+            source,
+            StringComparison.Ordinal);
         Assert.DoesNotContain("partial class SqliteDownloadTaskStore", source, StringComparison.Ordinal);
         Assert.DoesNotContain("CommandText", source, StringComparison.Ordinal);
         Assert.DoesNotContain("Microsoft.Data.Sqlite", source, StringComparison.Ordinal);
@@ -109,6 +120,37 @@ public sealed class SqliteDownloadTaskStoreArchitectureTests
             Collaborators,
             collaborator => Assert.Contains($"new {collaborator}", source, StringComparison.Ordinal));
         Assert.Empty(FindFacadeDelegationViolations(source, ExpectedFacadeDelegations));
+    }
+
+    [Fact]
+    public void PersistenceContractsSeparateActiveTasksFromHistory()
+    {
+        var taskStore = ReadApplicationSource("IDownloadTaskStore.cs");
+        var historyStore = ReadApplicationSource("IDownloadHistoryStore.cs");
+        var taskService = ReadApplicationSource("IDownloadTaskApplicationService.cs");
+        var historyService = ReadApplicationSource("IDownloadHistoryService.cs");
+
+        Assert.Contains("CompleteAsync", taskStore, StringComparison.Ordinal);
+        Assert.DoesNotContain("AddHistoryAsync", taskStore, StringComparison.Ordinal);
+        Assert.DoesNotContain("GetHistoryPageAsync", taskStore, StringComparison.Ordinal);
+        Assert.DoesNotContain("DeleteHistoryAsync", taskStore, StringComparison.Ordinal);
+        Assert.DoesNotContain("ClearHistoryAsync", taskStore, StringComparison.Ordinal);
+
+        Assert.Contains("AddHistoryAsync", historyStore, StringComparison.Ordinal);
+        Assert.Contains("GetHistoryPageAsync", historyStore, StringComparison.Ordinal);
+        Assert.Contains("DeleteHistoryAsync", historyStore, StringComparison.Ordinal);
+        Assert.Contains("ClearHistoryAsync", historyStore, StringComparison.Ordinal);
+        Assert.DoesNotContain("CompleteAsync", historyStore, StringComparison.Ordinal);
+        Assert.DoesNotContain("UpdateAsync", historyStore, StringComparison.Ordinal);
+
+        Assert.DoesNotContain("DownloadHistoryRecord", taskService, StringComparison.Ordinal);
+        Assert.DoesNotContain("GetHistoryPageAsync", taskService, StringComparison.Ordinal);
+        Assert.DoesNotContain("DeleteHistoryAsync", taskService, StringComparison.Ordinal);
+        Assert.DoesNotContain("ClearHistoryAsync", taskService, StringComparison.Ordinal);
+        Assert.Contains("DownloadHistoryRecord", historyService, StringComparison.Ordinal);
+        Assert.Contains("GetPageAsync", historyService, StringComparison.Ordinal);
+        Assert.Contains("DeleteAsync", historyService, StringComparison.Ordinal);
+        Assert.Contains("ClearAsync", historyService, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -263,6 +305,14 @@ public sealed class SqliteDownloadTaskStoreArchitectureTests
 
     private static string ReadDownloadSource(string fileName) =>
         File.ReadAllText(Path.Combine(DownloadSourceRoot, fileName));
+
+    private static string ReadApplicationSource(string fileName) =>
+        File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "src",
+            "DownKyi.Application",
+            "Downloads",
+            fileName));
 
     private static List<string> FindFacadeDelegationViolations(
         string source,

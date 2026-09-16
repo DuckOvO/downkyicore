@@ -19,14 +19,19 @@ namespace DownKyi.Services.Download;
 internal sealed class DownloadTaskProjectionStore : IDisposable
 {
     private readonly IDownloadTaskApplicationService _tasks;
+    private readonly IDownloadHistoryService _history;
     private readonly IClock _clock;
     private readonly ConcurrentDictionary<DownloadTaskId, DownloadTask> _snapshots = new();
     private readonly ConcurrentDictionary<DownloadTaskId, DownloadingItem> _downloadingProjections = new();
     private bool _disposed;
 
-    public DownloadTaskProjectionStore(IDownloadTaskApplicationService tasks, IClock clock)
+    public DownloadTaskProjectionStore(
+        IDownloadTaskApplicationService tasks,
+        IDownloadHistoryService history,
+        IClock clock)
     {
         _tasks = tasks ?? throw new ArgumentNullException(nameof(tasks));
+        _history = history ?? throw new ArgumentNullException(nameof(history));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _tasks.TaskChanged += OnTaskChanged;
     }
@@ -80,7 +85,7 @@ internal sealed class DownloadTaskProjectionStore : IDisposable
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(history);
-        var result = await _tasks.AddHistoryAsync(history, cancellationToken).ConfigureAwait(true);
+        var result = await _history.AddAsync(history, cancellationToken).ConfigureAwait(true);
         if (result.IsSuccess)
         {
             return;
@@ -98,8 +103,8 @@ internal sealed class DownloadTaskProjectionStore : IDisposable
             return;
         }
 
-        var result = await _tasks
-            .DeleteHistoryAsync(downloadedItem.HistoryRecord.Id, cancellationToken)
+        var result = await _history
+            .DeleteAsync(downloadedItem.HistoryRecord.Id, cancellationToken)
             .ConfigureAwait(true);
         RequireSuccess(result.IsSuccess, result.Error?.Message);
     }
@@ -109,8 +114,8 @@ internal sealed class DownloadTaskProjectionStore : IDisposable
         int pageSize,
         CancellationToken cancellationToken = default)
     {
-        var page = await _tasks
-            .GetHistoryPageAsync(cursor, pageSize, cancellationToken)
+        var page = await _history
+            .GetPageAsync(cursor, pageSize, cancellationToken)
             .ConfigureAwait(true);
         return page;
     }
@@ -141,7 +146,7 @@ internal sealed class DownloadTaskProjectionStore : IDisposable
 
     public async Task ClearDownloadedAsync(CancellationToken cancellationToken = default)
     {
-        var result = await _tasks.ClearHistoryAsync(cancellationToken).ConfigureAwait(true);
+        var result = await _history.ClearAsync(cancellationToken).ConfigureAwait(true);
         RequireSuccess(result.IsSuccess, result.Error?.Message);
     }
 
@@ -201,11 +206,6 @@ internal sealed class DownloadTaskProjectionStore : IDisposable
 
     private void OnTaskChanged(object? sender, DownloadTaskChangedEventArgs args)
     {
-        if (args.Kind == DownloadTaskChangeKind.HistoryCleared)
-        {
-            return;
-        }
-
         if (args.Kind == DownloadTaskChangeKind.Deleted)
         {
             _snapshots.TryRemove(args.TaskId, out _);

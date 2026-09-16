@@ -32,6 +32,7 @@ public sealed class DownloadBootstrapHostedServiceTests
                        new SqliteDownloadTaskStoreOptions(databasePath), new SystemClock()))
             {
                 using var firstTasks = new DownloadTaskApplicationService(firstStore,
+                    new DownloadHistoryService(firstStore, firstStore),
                     new SystemClock());
                 var firstId = new DownloadTaskId("rekey-startup-a");
                 Assert.True((await firstTasks.AddAsync(CreateTask(firstId.Value, firstPath),
@@ -62,8 +63,11 @@ public sealed class DownloadBootstrapHostedServiceTests
 
             using var reopenedStore = new SqliteDownloadTaskStore(
                 new SqliteDownloadTaskStoreOptions(databasePath), new SystemClock());
-            using var tasks = new DownloadTaskApplicationService(reopenedStore, new SystemClock());
-            using var projections = new DownloadTaskProjectionStore(tasks, new SystemClock());
+            using var tasks = new DownloadTaskApplicationService(reopenedStore, new DownloadHistoryService(reopenedStore, reopenedStore), new SystemClock());
+            using var projections = new DownloadTaskProjectionStore(
+                tasks,
+                new DownloadHistoryService(reopenedStore, reopenedStore),
+                new SystemClock());
             var writer = new DownloadTaskStateWriter(tasks);
             var staging = new DownloadTaskStaging(NullLogger<DownloadTaskStaging>.Instance);
             var fileService = new DownloadTaskFileService(new AriaRuntimeClientRegistry(),
@@ -120,7 +124,7 @@ public sealed class DownloadBootstrapHostedServiceTests
                        new SqliteDownloadTaskStoreOptions(databasePath), new SystemClock()))
             {
                 await firstStore.InitializeAsync(TestContext.Current.CancellationToken);
-                using var firstTasks = new DownloadTaskApplicationService(firstStore, new SystemClock());
+                using var firstTasks = new DownloadTaskApplicationService(firstStore, new DownloadHistoryService(firstStore, firstStore), new SystemClock());
                 Assert.True((await firstTasks.AddAsync(CreateTask(taskId.Value, outputBase),
                     TestContext.Current.CancellationToken)).IsSuccess);
                 Assert.True((await firstTasks.StartAsync(taskId,
@@ -151,8 +155,13 @@ public sealed class DownloadBootstrapHostedServiceTests
                 new SqliteDownloadTaskStoreOptions(databasePath), new SystemClock());
             await reopenedStore.InitializeAsync(TestContext.Current.CancellationToken);
             using var reopenedTasks = new DownloadTaskApplicationService(
-                reopenedStore, new SystemClock());
-            using var projections = new DownloadTaskProjectionStore(reopenedTasks, new SystemClock());
+                reopenedStore,
+                new DownloadHistoryService(reopenedStore, reopenedStore),
+                new SystemClock());
+            using var projections = new DownloadTaskProjectionStore(
+                reopenedTasks,
+                new DownloadHistoryService(reopenedStore, reopenedStore),
+                new SystemClock());
             var writer = new DownloadTaskStateWriter(reopenedTasks);
             var staging = new DownloadTaskStaging(NullLogger<DownloadTaskStaging>.Instance);
             var fileService = new DownloadTaskFileService(new AriaRuntimeClientRegistry(),
@@ -200,8 +209,12 @@ public sealed class DownloadBootstrapHostedServiceTests
         var dispatcher = new ImmediateUiDispatcher();
         var listState = new DownloadListState();
         var clock = new FixedClock();
-        using var tasks = new DownloadTaskApplicationService(new EmptyDownloadTaskStore(), clock);
-        using var storage = new DownloadTaskProjectionStore(tasks, clock);
+        var taskStore = new EmptyDownloadTaskStore();
+        using var tasks = new DownloadTaskApplicationService(taskStore, new DownloadHistoryService(taskStore, taskStore), clock);
+        using var storage = new DownloadTaskProjectionStore(
+            tasks,
+            new DownloadHistoryService(taskStore, taskStore),
+            clock);
         var stateWriter = new DownloadTaskStateWriter(tasks);
         var queueGateway = new DownloadTaskQueueGateway();
         using var service = new DownloadBootstrapHostedService(
@@ -228,8 +241,12 @@ public sealed class DownloadBootstrapHostedServiceTests
     {
         using var runtime = new BlockingDownloadRuntime();
         var clock = new FixedClock();
-        using var tasks = new DownloadTaskApplicationService(new EmptyDownloadTaskStore(), clock);
-        using var storage = new DownloadTaskProjectionStore(tasks, clock);
+        var taskStore = new EmptyDownloadTaskStore();
+        using var tasks = new DownloadTaskApplicationService(taskStore, new DownloadHistoryService(taskStore, taskStore), clock);
+        using var storage = new DownloadTaskProjectionStore(
+            tasks,
+            new DownloadHistoryService(taskStore, taskStore),
+            clock);
         using var service = new DownloadBootstrapHostedService(
             new DownloadListState(),
             storage,
@@ -269,8 +286,11 @@ public sealed class DownloadBootstrapHostedServiceTests
                 new SqliteDownloadTaskStoreOptions(databasePath),
                 new SystemClock());
             var clock = new SystemClock();
-            using var tasks = new DownloadTaskApplicationService(store, clock);
-            using var projections = new DownloadTaskProjectionStore(tasks, clock);
+            using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+            using var projections = new DownloadTaskProjectionStore(
+                tasks,
+                new DownloadHistoryService(store, store),
+                clock);
             var stateWriter = new DownloadTaskStateWriter(tasks);
             var queued = CreateTask("queued");
             var interrupted = CreateTask("interrupted");
@@ -316,10 +336,15 @@ public sealed class DownloadBootstrapHostedServiceTests
     {
         using var runtime = new RecordingDownloadRuntime(failOnEnqueue: true);
         var clock = new FixedClock();
+        var taskStore = new EmptyDownloadTaskStore([CreateTask("queued")]);
         using var tasks = new DownloadTaskApplicationService(
-            new EmptyDownloadTaskStore([CreateTask("queued")]),
+            taskStore,
+            new DownloadHistoryService(taskStore, taskStore),
             clock);
-        using var storage = new DownloadTaskProjectionStore(tasks, clock);
+        using var storage = new DownloadTaskProjectionStore(
+            tasks,
+            new DownloadHistoryService(taskStore, taskStore),
+            clock);
         using var service = new DownloadBootstrapHostedService(
             new DownloadListState(),
             storage,
@@ -341,10 +366,15 @@ public sealed class DownloadBootstrapHostedServiceTests
     {
         using var runtime = new RecordingDownloadRuntime(failOnEnqueue: true);
         var clock = new FixedClock();
+        var taskStore = new EmptyDownloadTaskStore([CreateTask("startup-task")]);
         using var tasks = new DownloadTaskApplicationService(
-            new EmptyDownloadTaskStore([CreateTask("startup-task")]),
+            taskStore,
+            new DownloadHistoryService(taskStore, taskStore),
             clock);
-        using var storage = new DownloadTaskProjectionStore(tasks, clock);
+        using var storage = new DownloadTaskProjectionStore(
+            tasks,
+            new DownloadHistoryService(taskStore, taskStore),
+            clock);
         var listState = new DownloadListState();
         var queueGateway = new DownloadTaskQueueGateway();
         using var service = new DownloadBootstrapHostedService(
@@ -386,10 +416,15 @@ public sealed class DownloadBootstrapHostedServiceTests
             startFailure: CreateRuntimeStartupFailure(failureKind));
         var clock = new FixedClock();
         var startupTask = CreateTask($"startup-{failureKind}");
+        var taskStore = new EmptyDownloadTaskStore([startupTask]);
         using var tasks = new DownloadTaskApplicationService(
-            new EmptyDownloadTaskStore([startupTask]),
+            taskStore,
+            new DownloadHistoryService(taskStore, taskStore),
             clock);
-        using var storage = new DownloadTaskProjectionStore(tasks, clock);
+        using var storage = new DownloadTaskProjectionStore(
+            tasks,
+            new DownloadHistoryService(taskStore, taskStore),
+            clock);
         var queueGateway = new DownloadTaskQueueGateway();
         using var service = new DownloadBootstrapHostedService(
             new DownloadListState(),
@@ -426,10 +461,15 @@ public sealed class DownloadBootstrapHostedServiceTests
         using var runtime = new RecordingDownloadRuntime(
             startFailure: new TimeoutException("Synthetic runtime readiness timeout."));
         var clock = new FixedClock();
+        var taskStore = new EmptyDownloadTaskStore([paused, failed]);
         using var tasks = new DownloadTaskApplicationService(
-            new EmptyDownloadTaskStore([paused, failed]),
+            taskStore,
+            new DownloadHistoryService(taskStore, taskStore),
             clock);
-        using var storage = new DownloadTaskProjectionStore(tasks, clock);
+        using var storage = new DownloadTaskProjectionStore(
+            tasks,
+            new DownloadHistoryService(taskStore, taskStore),
+            clock);
         using var service = new DownloadBootstrapHostedService(
             new DownloadListState(),
             storage,
@@ -473,10 +513,15 @@ public sealed class DownloadBootstrapHostedServiceTests
         var task = CreateTask("paused-during-startup");
         using var runtime = new BlockingFailingStartRuntime();
         var clock = new FixedClock();
+        var taskStore = new EmptyDownloadTaskStore([task]);
         using var tasks = new DownloadTaskApplicationService(
-            new EmptyDownloadTaskStore([task]),
+            taskStore,
+            new DownloadHistoryService(taskStore, taskStore),
             clock);
-        using var storage = new DownloadTaskProjectionStore(tasks, clock);
+        using var storage = new DownloadTaskProjectionStore(
+            tasks,
+            new DownloadHistoryService(taskStore, taskStore),
+            clock);
         var stateWriter = new DownloadTaskStateWriter(tasks);
         var listState = new DownloadListState();
         using var service = new DownloadBootstrapHostedService(
@@ -511,10 +556,15 @@ public sealed class DownloadBootstrapHostedServiceTests
             .RequireValue();
         using var runtime = new BlockingSuccessfulStartRuntime();
         var clock = new FixedClock();
+        var taskStore = new EmptyDownloadTaskStore([task]);
         using var tasks = new DownloadTaskApplicationService(
-            new EmptyDownloadTaskStore([task]),
+            taskStore,
+            new DownloadHistoryService(taskStore, taskStore),
             clock);
-        using var storage = new DownloadTaskProjectionStore(tasks, clock);
+        using var storage = new DownloadTaskProjectionStore(
+            tasks,
+            new DownloadHistoryService(taskStore, taskStore),
+            clock);
         var stateWriter = new DownloadTaskStateWriter(tasks);
         var queueGateway = new DownloadTaskQueueGateway();
         using var service = new DownloadBootstrapHostedService(
@@ -551,10 +601,15 @@ public sealed class DownloadBootstrapHostedServiceTests
             .RequireValue();
         using var runtime = new BlockingSuccessfulStartRuntime();
         var clock = new FixedClock();
+        var taskStore = new EmptyDownloadTaskStore([task]);
         using var tasks = new DownloadTaskApplicationService(
-            new EmptyDownloadTaskStore([task]),
+            taskStore,
+            new DownloadHistoryService(taskStore, taskStore),
             clock);
-        using var storage = new DownloadTaskProjectionStore(tasks, clock);
+        using var storage = new DownloadTaskProjectionStore(
+            tasks,
+            new DownloadHistoryService(taskStore, taskStore),
+            clock);
         var stateWriter = new DownloadTaskStateWriter(tasks);
         var queueGateway = new DownloadTaskQueueGateway();
         using var service = new DownloadBootstrapHostedService(
@@ -818,7 +873,7 @@ public sealed class DownloadBootstrapHostedServiceTests
     }
 
     private sealed class EmptyDownloadTaskStore(
-        IReadOnlyList<DownloadTask>? unfinished = null) : IDownloadTaskStore
+        IReadOnlyList<DownloadTask>? unfinished = null) : IDownloadTaskStore, IDownloadHistoryStore
     {
         private readonly Dictionary<DownloadTaskId, DownloadTask> _tasks =
             (unfinished ?? []).ToDictionary(task => task.Id);

@@ -298,8 +298,11 @@ public sealed class DownloadAddOwnerTests : IDisposable
             DownloadTask? current = null)
         {
             Store = new MutableDownloadTaskStore(current);
-            _taskService = new DownloadTaskApplicationService(Store, new SystemClock());
-            _projectionStore = new DownloadTaskProjectionStore(_taskService, new SystemClock());
+            _taskService = new DownloadTaskApplicationService(Store, new DownloadHistoryService(Store, Store), new SystemClock());
+            _projectionStore = new DownloadTaskProjectionStore(
+                _taskService,
+                new DownloadHistoryService(Store, Store),
+                new SystemClock());
             ListState = new DownloadListState();
             Notifications = new RecordingNotificationService();
             Dialogs = new StubDialogService(outcome);
@@ -373,7 +376,9 @@ public sealed class DownloadAddOwnerTests : IDisposable
         }
     }
 
-    private sealed class MutableDownloadTaskStore(DownloadTask? current) : IDownloadTaskStore
+    private sealed class MutableDownloadTaskStore(DownloadTask? current) :
+        IDownloadTaskStore,
+        IDownloadHistoryStore
     {
         public DownloadTask? Current { get; private set; } = current;
 

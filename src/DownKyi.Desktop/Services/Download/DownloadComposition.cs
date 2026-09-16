@@ -16,7 +16,12 @@ internal static class DownloadComposition
         services.AddSingleton(new SqliteDownloadTaskStoreOptions(ApplicationStorage.GetDbPath()));
         services.AddSingleton<FfmpegProcessor>();
         services.AddSingleton<IPhysicalOutputPathResolver, FileSystemPhysicalOutputPathResolver>();
-        services.AddSingleton<IDownloadTaskStore, SqliteDownloadTaskStore>();
+        services.AddSingleton<SqliteDownloadTaskStore>();
+        services.AddSingleton<IDownloadTaskStore>(provider =>
+            provider.GetRequiredService<SqliteDownloadTaskStore>());
+        services.AddSingleton<IDownloadHistoryStore>(provider =>
+            provider.GetRequiredService<SqliteDownloadTaskStore>());
+        services.AddSingleton<IDownloadHistoryService, DownloadHistoryService>();
         services.AddSingleton<IDownloadTaskApplicationService, DownloadTaskApplicationService>();
 
         services.AddSingleton<DownloadTaskProjectionStore>();

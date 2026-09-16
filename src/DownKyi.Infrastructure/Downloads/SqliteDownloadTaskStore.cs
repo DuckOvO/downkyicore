@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace DownKyi.Infrastructure.Downloads;
 
-public sealed class SqliteDownloadTaskStore : IDownloadTaskStore, IDisposable
+public sealed class SqliteDownloadTaskStore : IDownloadTaskStore, IDownloadHistoryStore, IDisposable
 {
     private readonly SqliteDownloadStoreDatabase _database;
     private readonly SqliteDownloadStoreQueries _queries;

@@ -73,8 +73,11 @@ public sealed class DownloadExecutionContextFactoryTests : IDisposable
             new SqliteDownloadTaskStoreOptions(Path.Combine(_directory, "download.db")),
             new SystemClock());
         var clock = new SystemClock();
-        using var tasks = new DownloadTaskApplicationService(store, clock);
-        using var projections = new DownloadTaskProjectionStore(tasks, clock);
+        using var tasks = new DownloadTaskApplicationService(store, new DownloadHistoryService(store, store), clock);
+        using var projections = new DownloadTaskProjectionStore(
+            tasks,
+            new DownloadHistoryService(store, store),
+            clock);
         var stateWriter = new DownloadTaskStateWriter(tasks);
         await projections.AddDownloadingAsync(admitted, TestContext.Current.CancellationToken);
         var taskId = new DownloadTaskId(downloadBase.Id);

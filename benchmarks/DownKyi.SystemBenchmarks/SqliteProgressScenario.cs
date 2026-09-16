@@ -178,11 +178,6 @@ internal static class SqliteProgressScenario
         public Task<OperationResult> AddAsync(DownloadTask task, CancellationToken cancellationToken) =>
             _inner.AddAsync(task, cancellationToken);
 
-        public Task<OperationResult> AddHistoryAsync(
-            DownloadHistoryRecord history,
-            CancellationToken cancellationToken) =>
-            _inner.AddHistoryAsync(history, cancellationToken);
-
         public Task<OperationResult> UpdateAsync(
             DownloadTask task,
             long expectedVersion,
@@ -224,23 +219,9 @@ internal static class SqliteProgressScenario
             CancellationToken cancellationToken) =>
             _inner.GetActiveOutputReservationKeysAsync(ignoreCase, cancellationToken);
 
-        public Task<DownloadHistoryPage> GetHistoryPageAsync(
-            DownloadHistoryCursor? cursor,
-            int pageSize,
-            CancellationToken cancellationToken) =>
-            _inner.GetHistoryPageAsync(cursor, pageSize, cancellationToken);
-
         public Task<OperationResult> DeleteAsync(
             DownloadTaskId taskId,
             CancellationToken cancellationToken) => _inner.DeleteAsync(taskId, cancellationToken);
-
-        public Task<OperationResult> DeleteHistoryAsync(
-            DownloadTaskId taskId,
-            CancellationToken cancellationToken) =>
-            _inner.DeleteHistoryAsync(taskId, cancellationToken);
-
-        public Task<OperationResult> ClearHistoryAsync(CancellationToken cancellationToken) =>
-            _inner.ClearHistoryAsync(cancellationToken);
 
         public Task<IReadOnlyList<QuarantinedDownloadRecord>> GetQuarantinedRecordsAsync(
             CancellationToken cancellationToken) => _inner.GetQuarantinedRecordsAsync(cancellationToken);
