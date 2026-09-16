@@ -26,7 +26,7 @@ internal sealed class OwnedProcessScope : IDisposable
 
     internal Process Host { get; }
     internal int RootPid { get; }
-    internal DateTimeOffset RootStartTimeUtc { get; }
+    internal DateTimeOffset? RootStartTimeUtc { get; }
     internal SafeFileHandle? WindowsJobHandle => job;
 
     internal static async Task<OwnedProcessScope> StartAsync(ProcessStartInfo testStartInfo, TimeSpan startupWindow)
@@ -258,7 +258,7 @@ internal sealed class OwnedProcessScope : IDisposable
             using var child = Process.Start(childInfo)
                 ?? throw new InvalidOperationException("The scoped test process did not start.");
             await writer.WriteLineAsync(JsonSerializer.Serialize(new ScopeHandshake(
-                child.Id, child.StartTime.ToUniversalTime(), null))).ConfigureAwait(false);
+                child.Id, ReadStartTimeUtcBestEffort(child), null))).ConfigureAwait(false);
             await child.WaitForExitAsync().ConfigureAwait(false);
             return child.ExitCode;
         }
@@ -269,6 +269,23 @@ internal sealed class OwnedProcessScope : IDisposable
             return 2;
         }
     }
+
+    internal static DateTimeOffset? ReadStartTimeUtcBestEffort(
+        Process process,
+        Func<Process, DateTimeOffset>? readStartTimeUtc = null)
+    {
+        try
+        {
+            return (readStartTimeUtc ?? ReadStartTimeUtc)(process);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
+        {
+            return null;
+        }
+    }
+
+    private static DateTimeOffset ReadStartTimeUtc(Process process) =>
+        process.StartTime.ToUniversalTime();
 
     private static SafeFileHandle CreateWindowsJob(string name)
     {
@@ -336,7 +353,7 @@ internal sealed class OwnedProcessScope : IDisposable
         string WorkingDirectory,
         Dictionary<string, string?> Environment);
 
-    private sealed record ScopeHandshake(int Pid, DateTimeOffset StartTimeUtc, string? Error);
+    private sealed record ScopeHandshake(int Pid, DateTimeOffset? StartTimeUtc, string? Error);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct JobObjectBasicLimitInformation

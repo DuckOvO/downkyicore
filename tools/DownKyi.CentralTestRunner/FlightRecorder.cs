@@ -74,7 +74,7 @@ internal sealed class FlightRecorder
         return recorder;
     }
 
-    public void SetRootIdentity(int pid, DateTimeOffset startTimeUtc)
+    public void SetRootIdentity(int pid, DateTimeOffset? startTimeUtc)
     {
         report.RootProcess = new RootProcessIdentity
         {

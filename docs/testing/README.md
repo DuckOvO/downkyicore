@@ -34,7 +34,7 @@ repository entry。
 ## Lightweight Flight Recorder
 
 CentralTestRunner 從 test process 啟動時記錄 slice identity、root PID 與
-start time，以及 exit、exit code、timeout、cancellation、bounded stop、
+可取得時的 start time，以及 exit、exit code、timeout、cancellation、bounded stop、
 cleanup 和 bounded stdout/stderr tail。正常 PASS 會刪除 recorder evidence。
 
 FAIL、timeout 或 abnormal cleanup 會保存 evidence，並取得一次 failure-time
