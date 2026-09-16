@@ -158,6 +158,32 @@ public sealed class DownloadTaskStateMachineTests
     }
 
     [Fact]
+    public void CompletedHistoryImportPreservesCompletionWithoutInventingRuntimeState()
+    {
+        var queued = CreateTask();
+        var completion = new DownloadCompletion(1234, "finished", "25 MB/s");
+        var migratedAtUtc = Epoch.AddDays(1);
+
+        var history = DownloadTask.ImportCompletedHistory(
+            queued.Id,
+            queued.Metadata,
+            queued.Plan,
+            queued.Output,
+            completion,
+            queued.CreatedAtUtc,
+            migratedAtUtc);
+
+        Assert.Equal(DownloadPhase.Completed, history.Phase);
+        Assert.Same(completion, history.Completion);
+        Assert.Equal(DownloadProgress.None, history.Progress);
+        Assert.Equal(DownloadTransferState.Empty, history.Transfer);
+        Assert.Null(history.Failure);
+        Assert.Equal(0, history.Version);
+        Assert.Equal(queued.CreatedAtUtc, history.CreatedAtUtc);
+        Assert.Equal(migratedAtUtc, history.UpdatedAtUtc);
+    }
+
+    [Fact]
     public void UpdatesRejectTimestampsOlderThanTheCurrentSnapshot()
     {
         var downloading = CreateTask().Start(Epoch.AddSeconds(2)).RequireValue();
