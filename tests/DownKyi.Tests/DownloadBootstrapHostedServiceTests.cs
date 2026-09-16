@@ -888,7 +888,10 @@ public sealed class DownloadBootstrapHostedServiceTests
     }
 
     private sealed class EmptyDownloadTaskStore(
-        IReadOnlyList<DownloadTask>? unfinished = null) : IDownloadTaskStore, IDownloadHistoryStore
+        IReadOnlyList<DownloadTask>? unfinished = null) :
+        IDownloadTaskStore,
+        IDownloadHistoryStore,
+        IDownloadCompletionStore
     {
         private readonly Dictionary<DownloadTaskId, DownloadTask> _tasks =
             (unfinished ?? []).ToDictionary(task => task.Id);

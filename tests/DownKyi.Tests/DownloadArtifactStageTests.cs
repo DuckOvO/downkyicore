@@ -924,7 +924,10 @@ public sealed class DownloadArtifactStageTests
         }
     }
 
-    private sealed class SingleTaskStore : IDownloadTaskStore, IDownloadHistoryStore
+    private sealed class SingleTaskStore :
+        IDownloadTaskStore,
+        IDownloadHistoryStore,
+        IDownloadCompletionStore
     {
         private DownloadTask? _task;
 

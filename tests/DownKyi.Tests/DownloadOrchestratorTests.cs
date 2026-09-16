@@ -328,7 +328,10 @@ public sealed class DownloadOrchestratorTests
         }
     }
 
-    private sealed class InMemoryDownloadTaskStore : IDownloadTaskStore, IDownloadHistoryStore
+    private sealed class InMemoryDownloadTaskStore :
+        IDownloadTaskStore,
+        IDownloadHistoryStore,
+        IDownloadCompletionStore
     {
         private readonly Lock _sync = new();
         private readonly Dictionary<DownloadTaskId, DownloadTask> _tasks = [];

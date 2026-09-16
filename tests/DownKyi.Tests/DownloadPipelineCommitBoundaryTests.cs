@@ -343,7 +343,10 @@ public sealed class DownloadPipelineCommitBoundaryTests
 
     private sealed class CommitBoundaryStore(
         bool rejectCompletion,
-        bool rejectPublishingStart) : IDownloadTaskStore, IDownloadHistoryStore
+        bool rejectPublishingStart) :
+        IDownloadTaskStore,
+        IDownloadHistoryStore,
+        IDownloadCompletionStore
     {
         public DownloadTask? Current { get; private set; }
 

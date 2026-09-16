@@ -372,7 +372,10 @@ public sealed class DownloadTaskApplicationServiceTests
         }
     }
 
-    private sealed class RecordingStore : IDownloadTaskStore, IDownloadHistoryStore
+    private sealed class RecordingStore :
+        IDownloadTaskStore,
+        IDownloadHistoryStore,
+        IDownloadCompletionStore
     {
         private readonly Lock _sync = new();
 

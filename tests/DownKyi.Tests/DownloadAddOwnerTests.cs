@@ -388,7 +388,8 @@ public sealed class DownloadAddOwnerTests : IDisposable
         DownloadTask? current,
         DownloadHistoryRecord? history) :
         IDownloadTaskStore,
-        IDownloadHistoryStore
+        IDownloadHistoryStore,
+        IDownloadCompletionStore
     {
         public DownloadTask? Current { get; private set; } = current;
 

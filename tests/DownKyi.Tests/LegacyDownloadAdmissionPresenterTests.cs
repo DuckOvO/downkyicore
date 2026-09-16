@@ -94,7 +94,10 @@ public sealed class LegacyDownloadAdmissionPresenterTests
         }
     }
 
-    private sealed class GateStore : IDownloadTaskStore, IDownloadHistoryStore
+    private sealed class GateStore :
+        IDownloadTaskStore,
+        IDownloadHistoryStore,
+        IDownloadCompletionStore
     {
         public bool Blocked { get; private set; } = true;
 

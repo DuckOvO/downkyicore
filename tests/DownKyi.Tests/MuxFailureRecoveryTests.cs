@@ -387,7 +387,10 @@ public sealed class MuxFailureRecoveryTests
 
     private sealed record DurlTestSource(int Order, string TransferKey, string FilePath);
 
-    private sealed class SingleTaskStore : IDownloadTaskStore, IDownloadHistoryStore
+    private sealed class SingleTaskStore :
+        IDownloadTaskStore,
+        IDownloadHistoryStore,
+        IDownloadCompletionStore
     {
         private DownloadTask? _task;
 

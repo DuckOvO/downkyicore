@@ -614,6 +614,34 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task HistoryInsertFailureRollsBackCompletedTransitionAndKeepsRecoverableTask()
+    {
+        var active = CreateQueuedTask("completion-write-failure", Path.Combine(_directory, "failure"));
+        active = active.Start(_clock.UtcNow.AddSeconds(1)).RequireValue();
+        var completed = active.Complete(
+            new DownloadCompletion(123, "finished", null),
+            _clock.UtcNow.AddSeconds(2)).RequireValue();
+        using var store = CreateStore();
+        Assert.True((await store.AddAsync(
+            active,
+            TestContext.Current.CancellationToken)).IsSuccess);
+        await CreateHistoryInsertFailureTriggerAsync();
+
+        await Assert.ThrowsAsync<SqliteException>(() => store.CompleteAsync(
+            completed,
+            DownloadHistoryRecord.FromCompletedTask(completed),
+            active.Version,
+            TestContext.Current.CancellationToken));
+
+        var restored = await store.FindAsync(active.Id, TestContext.Current.CancellationToken);
+        Assert.NotNull(restored);
+        Assert.Equal(active.Version, restored.Version);
+        Assert.Equal(active.Phase, restored.Phase);
+        Assert.Equal(1, await CountDownloadBaseRecordAsync(active.Id.Value));
+        Assert.Equal(0, await CountHistoryRecordAsync(active.Id.Value));
+    }
+
+    [Fact]
     public async Task PendingPublicationSurvivesDatabaseReopenWithoutBecomingPublished()
     {
         var task = DownloadTask.Create(
@@ -2185,6 +2213,20 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
             task.Completion!.MaximumSpeedText ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("@finished_timestamp", task.Completion.FinishedTimestamp);
         command.Parameters.AddWithValue("@finished_time", task.Completion.FinishedTimeText);
+        await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task CreateHistoryInsertFailureTriggerAsync()
+    {
+        using var connection = await OpenConnectionAsync(readOnly: false).ConfigureAwait(false);
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            CREATE TRIGGER reject_history_insert
+            BEFORE INSERT ON download_history
+            BEGIN
+                INSERT INTO missing_history_sink(id) VALUES (NEW.id);
+            END;
+            """;
         await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
     }
 

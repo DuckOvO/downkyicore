@@ -21,6 +21,8 @@ internal static class DownloadComposition
             provider.GetRequiredService<SqliteDownloadTaskStore>());
         services.AddSingleton<IDownloadHistoryStore>(provider =>
             provider.GetRequiredService<SqliteDownloadTaskStore>());
+        services.AddSingleton<IDownloadCompletionStore>(provider =>
+            provider.GetRequiredService<SqliteDownloadTaskStore>());
         services.AddSingleton<IDownloadHistoryService, DownloadHistoryService>();
         services.AddSingleton<IDownloadTaskApplicationService, DownloadTaskApplicationService>();
 

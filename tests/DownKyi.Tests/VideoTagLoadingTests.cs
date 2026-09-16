@@ -556,7 +556,10 @@ public sealed class VideoTagLoadingTests : IDisposable
         }
     }
 
-    private sealed class RecordingDownloadTaskStore : IDownloadTaskStore, IDownloadHistoryStore
+    private sealed class RecordingDownloadTaskStore :
+        IDownloadTaskStore,
+        IDownloadHistoryStore,
+        IDownloadCompletionStore
     {
         public int AddCount { get; private set; }
 

@@ -96,11 +96,11 @@ public sealed class SqliteDownloadTaskStoreArchitectureTests
     {
         var source = ReadDownloadSource(FacadeFile);
 
-        Assert.Contains(
-            "public sealed class SqliteDownloadTaskStore : " +
-            "IDownloadTaskStore, IDownloadHistoryStore, IDisposable",
-            source,
-            StringComparison.Ordinal);
+        Assert.Matches(
+            "public sealed class SqliteDownloadTaskStore\\s*:\\s*" +
+            "IDownloadTaskStore,\\s*IDownloadHistoryStore,\\s*" +
+            "IDownloadCompletionStore,\\s*IDisposable",
+            source);
         Assert.DoesNotContain("partial class SqliteDownloadTaskStore", source, StringComparison.Ordinal);
         Assert.DoesNotContain("CommandText", source, StringComparison.Ordinal);
         Assert.DoesNotContain("Microsoft.Data.Sqlite", source, StringComparison.Ordinal);
@@ -123,14 +123,18 @@ public sealed class SqliteDownloadTaskStoreArchitectureTests
     }
 
     [Fact]
-    public void PersistenceContractsSeparateActiveTasksFromHistory()
+    public void PersistenceContractsSeparateActiveHistoryAndCompletionAuthority()
     {
         var taskStore = ReadApplicationSource("IDownloadTaskStore.cs");
         var historyStore = ReadApplicationSource("IDownloadHistoryStore.cs");
+        var completionStore = ReadApplicationSource("IDownloadCompletionStore.cs");
         var taskService = ReadApplicationSource("IDownloadTaskApplicationService.cs");
         var historyService = ReadApplicationSource("IDownloadHistoryService.cs");
+        var taskServiceImplementation = ReadApplicationSource("DownloadTaskApplicationService.cs");
+        var historyServiceImplementation = ReadApplicationSource("DownloadHistoryService.cs");
 
-        Assert.Contains("CompleteAsync", taskStore, StringComparison.Ordinal);
+        Assert.DoesNotContain("CompleteAsync", taskStore, StringComparison.Ordinal);
+        Assert.DoesNotContain("DownloadHistoryRecord", taskStore, StringComparison.Ordinal);
         Assert.DoesNotContain("AddHistoryAsync", taskStore, StringComparison.Ordinal);
         Assert.DoesNotContain("GetHistoryPageAsync", taskStore, StringComparison.Ordinal);
         Assert.DoesNotContain("DeleteHistoryAsync", taskStore, StringComparison.Ordinal);
@@ -143,6 +147,13 @@ public sealed class SqliteDownloadTaskStoreArchitectureTests
         Assert.DoesNotContain("CompleteAsync", historyStore, StringComparison.Ordinal);
         Assert.DoesNotContain("UpdateAsync", historyStore, StringComparison.Ordinal);
 
+        Assert.Contains("CompleteAsync", completionStore, StringComparison.Ordinal);
+        Assert.Contains("DownloadTask task", completionStore, StringComparison.Ordinal);
+        Assert.Contains("DownloadHistoryRecord history", completionStore, StringComparison.Ordinal);
+        Assert.DoesNotContain("AddHistoryAsync", completionStore, StringComparison.Ordinal);
+        Assert.DoesNotContain("GetHistoryPageAsync", completionStore, StringComparison.Ordinal);
+        Assert.DoesNotContain("UpdateAsync", completionStore, StringComparison.Ordinal);
+
         Assert.DoesNotContain("DownloadHistoryRecord", taskService, StringComparison.Ordinal);
         Assert.DoesNotContain("GetHistoryPageAsync", taskService, StringComparison.Ordinal);
         Assert.DoesNotContain("DeleteHistoryAsync", taskService, StringComparison.Ordinal);
@@ -151,6 +162,42 @@ public sealed class SqliteDownloadTaskStoreArchitectureTests
         Assert.Contains("GetPageAsync", historyService, StringComparison.Ordinal);
         Assert.Contains("DeleteAsync", historyService, StringComparison.Ordinal);
         Assert.Contains("ClearAsync", historyService, StringComparison.Ordinal);
+
+        Assert.Contains("IDownloadCompletionStore", historyServiceImplementation, StringComparison.Ordinal);
+        Assert.DoesNotContain("IDownloadTaskStore", historyServiceImplementation, StringComparison.Ordinal);
+        Assert.Contains("_completion.CompleteAsync", historyServiceImplementation, StringComparison.Ordinal);
+
+        Assert.Contains("_history.CompleteAsync", taskServiceImplementation, StringComparison.Ordinal);
+        Assert.DoesNotContain("_history.AddAsync", taskServiceImplementation, StringComparison.Ordinal);
+        Assert.DoesNotContain("_store.DeleteAsync", taskServiceImplementation, StringComparison.Ordinal);
+
+        var completionAuthorityFiles = Directory
+            .EnumerateFiles(Path.Combine(RepositoryRoot, "src"), "*.cs", SearchOption.AllDirectories)
+            .Where(file => File.ReadAllText(file)
+                .Contains("IDownloadCompletionStore", StringComparison.Ordinal))
+            .Select(file => Path.GetRelativePath(RepositoryRoot, file))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        Assert.Equal(
+        [
+            Path.Combine("src", "DownKyi.Application", "Downloads", "DownloadHistoryService.cs"),
+            Path.Combine("src", "DownKyi.Application", "Downloads", "IDownloadCompletionStore.cs"),
+            Path.Combine("src", "DownKyi.Desktop", "Services", "Download", "DownloadComposition.cs"),
+            Path.Combine("src", "DownKyi.Infrastructure", "Downloads", "SqliteDownloadTaskStore.cs")
+        ],
+            completionAuthorityFiles);
+
+        var composition = File.ReadAllText(Path.Combine(
+            RepositoryRoot,
+            "src",
+            "DownKyi.Desktop",
+            "Services",
+            "Download",
+            "DownloadComposition.cs"));
+        Assert.Matches(
+            "AddSingleton<IDownloadCompletionStore>\\(provider\\s*=>\\s*" +
+            "provider\\.GetRequiredService<SqliteDownloadTaskStore>\\(\\)\\)",
+            composition);
     }
 
     [Fact]

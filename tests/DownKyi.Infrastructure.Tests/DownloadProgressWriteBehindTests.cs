@@ -148,12 +148,6 @@ public sealed class DownloadProgressWriteBehindTests
             long expectedVersion,
             CancellationToken cancellationToken) => throw new NotSupportedException();
 
-        public Task<OperationResult> CompleteAsync(
-            DownloadTask task,
-            DownloadHistoryRecord history,
-            long expectedVersion,
-            CancellationToken cancellationToken) => throw new NotSupportedException();
-
         public Task<OperationResult> UpdateProgressAsync(
             DownloadProgressWrite progressWrite,
             CancellationToken cancellationToken)

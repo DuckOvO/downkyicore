@@ -5,19 +5,19 @@ namespace DownKyi.Application.Downloads;
 
 public sealed class DownloadHistoryService : IDownloadHistoryService
 {
-    private readonly IDownloadTaskStore _tasks;
+    private readonly IDownloadCompletionStore _completion;
     private readonly IDownloadHistoryStore _history;
 
     public DownloadHistoryService(
-        IDownloadTaskStore tasks,
+        IDownloadCompletionStore completion,
         IDownloadHistoryStore history)
     {
-        _tasks = tasks ?? throw new ArgumentNullException(nameof(tasks));
+        _completion = completion ?? throw new ArgumentNullException(nameof(completion));
         _history = history ?? throw new ArgumentNullException(nameof(history));
     }
 
     public static DownloadHistoryService CreateForSharedStore<TStore>(TStore store)
-        where TStore : IDownloadTaskStore, IDownloadHistoryStore
+        where TStore : IDownloadCompletionStore, IDownloadHistoryStore
     {
         ArgumentNullException.ThrowIfNull(store);
         return new DownloadHistoryService(store, store);
@@ -37,7 +37,7 @@ public sealed class DownloadHistoryService : IDownloadHistoryService
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(completedTask);
-        return _tasks.CompleteAsync(
+        return _completion.CompleteAsync(
             completedTask,
             DownloadHistoryRecord.FromCompletedTask(completedTask),
             expectedVersion,

@@ -784,10 +784,13 @@ public sealed class DownloadTaskAdmissionServiceTests : IDisposable
 
     private sealed class CountingDownloadTaskStore(IDownloadTaskStore inner) :
         IDownloadTaskStore,
-        IDownloadHistoryStore
+        IDownloadHistoryStore,
+        IDownloadCompletionStore
     {
         private readonly IDownloadHistoryStore _history = inner as IDownloadHistoryStore ??
             throw new ArgumentException("The inner store must provide history storage.", nameof(inner));
+        private readonly IDownloadCompletionStore _completion = inner as IDownloadCompletionStore ??
+            throw new ArgumentException("The inner store must provide completion storage.", nameof(inner));
         public bool RejectAdds { get; init; }
 
         public int GetUnfinishedCallCount { get; private set; }
@@ -829,7 +832,7 @@ public sealed class DownloadTaskAdmissionServiceTests : IDisposable
             DownloadHistoryRecord history,
             long expectedVersion,
             CancellationToken cancellationToken) =>
-            inner.CompleteAsync(task, history, expectedVersion, cancellationToken);
+            _completion.CompleteAsync(task, history, expectedVersion, cancellationToken);
 
         public Task<OperationResult> UpdateProgressAsync(
             DownloadProgressWrite progressWrite,

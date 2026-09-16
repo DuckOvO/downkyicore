@@ -14,12 +14,6 @@ public interface IDownloadTaskStore
         long expectedVersion,
         CancellationToken cancellationToken);
 
-    Task<OperationResult> CompleteAsync(
-        DownloadTask task,
-        DownloadHistoryRecord history,
-        long expectedVersion,
-        CancellationToken cancellationToken);
-
     Task<OperationResult> UpdateProgressAsync(
         DownloadProgressWrite progressWrite,
         CancellationToken cancellationToken);
