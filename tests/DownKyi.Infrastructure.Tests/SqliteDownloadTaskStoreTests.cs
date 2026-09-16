@@ -210,6 +210,32 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task LegacyHistoryQuarantineFollowsExplicitHistoryProjection()
+    {
+        var completed = CreateCompletedTask(
+            "legacy-history-quarantine",
+            123,
+            Path.Combine(_directory, "history-quarantine", "video"));
+        await CreateVersionThreeDatabaseAsync(completed);
+        await InsertLegacyQuarantineAsync("downloaded", completed.Id.Value);
+        using var store = CreateStore();
+
+        await store.InitializeAsync(TestContext.Current.CancellationToken);
+
+        Assert.Empty((await store.GetHistoryPageAsync(
+            null,
+            10,
+            TestContext.Current.CancellationToken)).Items);
+        var quarantine = Assert.Single(
+            await store.GetQuarantinedRecordsAsync(TestContext.Current.CancellationToken));
+        Assert.Equal("download_history", quarantine.SourceTable);
+        Assert.Equal(completed.Id.Value, quarantine.RecordId);
+        Assert.Equal("legacy-downloaded-corrupt-record", quarantine.Reason);
+        Assert.Equal(0, await CountDownloadBaseRecordAsync(completed.Id.Value));
+        Assert.False(await TableExistsAsync("downloaded"));
+    }
+
+    [Fact]
     public async Task VersionThreeEquivalentPhysicalPathRemainsAvailableWithoutBlockingAdmission()
     {
         var originalPath = Path.Combine(_directory, "equivalent", "video");

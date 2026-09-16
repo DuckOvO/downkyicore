@@ -87,6 +87,7 @@ public sealed class DownloadStoreSchemaArchitectureTests
         Assert.DoesNotContain("format.UserVersion", source, StringComparison.Ordinal);
         Assert.DoesNotContain("DownloadStoreSchemaV", source, StringComparison.Ordinal);
         Assert.DoesNotContain("IPhysicalOutputPathResolver", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("SET source_table = 'downloading'", source, StringComparison.Ordinal);
     }
 
     [Fact]
