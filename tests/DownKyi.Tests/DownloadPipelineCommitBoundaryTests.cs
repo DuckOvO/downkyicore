@@ -75,7 +75,10 @@ public sealed class DownloadPipelineCommitBoundaryTests
         Assert.True(result.IsSuccess);
         harness.AssertSourcesAndSidecarsDeleted();
         Assert.True(File.Exists(harness.PublishedOutput));
-        Assert.Equal(DownloadPhase.Completed, harness.Store.Current?.Phase);
+        Assert.Null(harness.Store.Current);
+        Assert.NotNull(harness.Store.History);
+        Assert.Equal(harness.PublishedOutput,
+            harness.Store.History.PublishedArtifacts["media"]);
         Assert.Empty(harness.Lists.Downloading);
         Assert.Single(harness.Lists.Downloaded);
     }
@@ -114,9 +117,10 @@ public sealed class DownloadPipelineCommitBoundaryTests
         Assert.True(retry.IsSuccess);
         Assert.Equal(new byte[] { 7, 8, 9 }, await File.ReadAllBytesAsync(harness.PublishedOutput, TestContext.Current.CancellationToken));
         Assert.False(File.Exists(harness.Output));
-        Assert.Equal(DownloadPhase.Completed, harness.Store.Current?.Phase);
+        Assert.Null(harness.Store.Current);
+        Assert.NotNull(harness.Store.History);
         Assert.Equal(harness.PublishedOutput,
-            harness.Store.Current?.Output.PublishedArtifacts["media"]);
+            harness.Store.History.PublishedArtifacts["media"]);
         harness.AssertSourcesAndSidecarsDeleted();
     }
 
