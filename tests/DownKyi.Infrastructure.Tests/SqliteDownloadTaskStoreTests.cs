@@ -123,28 +123,65 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
             $"download.db.schema-v{version}-*.bak"));
     }
 
-    [Fact]
-    public async Task LegacyMigrationPrefersRecoverableActiveTaskWhenDownloadedRowSharesId()
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task LegacyMigrationKeepsCollisionQuarantineWithItsOwner(
+        bool quarantineActive,
+        bool quarantineHistory)
     {
         var active = CreatePausedTask(
             "legacy-active-history-collision",
             Path.Combine(_directory, "collision", "video"));
         await CreateVersionThreeDatabaseAsync(active);
         await InsertLegacyDownloadedRowAsync(active.Id.Value);
+        if (quarantineActive)
+        {
+            await InsertLegacyQuarantineAsync("downloading", active.Id.Value);
+        }
+
+        if (quarantineHistory)
+        {
+            await InsertLegacyQuarantineAsync("downloaded", active.Id.Value);
+        }
+
         var before = await ReadStoredStateAsync(active.Id.Value);
 
         using (var first = CreateStore())
         {
             await first.InitializeAsync(TestContext.Current.CancellationToken);
 
-            var restored = Assert.Single(
-                await first.GetUnfinishedAsync(TestContext.Current.CancellationToken));
-            Assert.Equal(active.Id, restored.Id);
-            Assert.Equal(DownloadPhase.Paused, restored.Phase);
+            var unfinished = await first.GetUnfinishedAsync(TestContext.Current.CancellationToken);
+            if (quarantineActive)
+            {
+                Assert.Empty(unfinished);
+            }
+            else
+            {
+                var restored = Assert.Single(unfinished);
+                Assert.Equal(active.Id, restored.Id);
+                Assert.Equal(DownloadPhase.Paused, restored.Phase);
+            }
+
             Assert.Empty((await first.GetHistoryPageAsync(
                 null,
                 10,
                 TestContext.Current.CancellationToken)).Items);
+            var quarantine = await first.GetQuarantinedRecordsAsync(
+                TestContext.Current.CancellationToken);
+            if (quarantineActive)
+            {
+                var activeQuarantine = Assert.Single(quarantine);
+                Assert.Equal("downloading", activeQuarantine.SourceTable);
+                Assert.Equal(active.Id.Value, activeQuarantine.RecordId);
+                Assert.Equal("legacy-downloading-corrupt-record", activeQuarantine.Reason);
+            }
+            else
+            {
+                Assert.Empty(quarantine);
+            }
         }
 
         Assert.Equal(before, await ReadStoredStateAsync(active.Id.Value));
@@ -155,10 +192,17 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
 
         using var reopened = CreateStore();
         await reopened.InitializeAsync(TestContext.Current.CancellationToken);
-        Assert.Equal(
-            active.Id,
-            Assert.Single(await reopened.GetUnfinishedAsync(
-                TestContext.Current.CancellationToken)).Id);
+        var reopenedUnfinished = await reopened.GetUnfinishedAsync(
+            TestContext.Current.CancellationToken);
+        if (quarantineActive)
+        {
+            Assert.Empty(reopenedUnfinished);
+        }
+        else
+        {
+            Assert.Equal(active.Id, Assert.Single(reopenedUnfinished).Id);
+        }
+
         Assert.Empty((await reopened.GetHistoryPageAsync(
             null,
             10,
@@ -2255,6 +2299,22 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
             task.Completion!.MaximumSpeedText ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("@finished_timestamp", task.Completion.FinishedTimestamp);
         command.Parameters.AddWithValue("@finished_time", task.Completion.FinishedTimeText);
+        await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task InsertLegacyQuarantineAsync(string sourceTable, string id)
+    {
+        using var connection = await OpenConnectionAsync(readOnly: false).ConfigureAwait(false);
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO download_quarantine
+                (source_table, record_id, field_name, reason, quarantined_at_utc)
+            VALUES (@source_table, @id, 'legacy-field', @reason, @now)
+            """;
+        command.Parameters.AddWithValue("@source_table", sourceTable);
+        command.Parameters.AddWithValue("@id", id);
+        command.Parameters.AddWithValue("@reason", $"legacy-{sourceTable}-corrupt-record");
+        command.Parameters.AddWithValue("@now", _clock.UtcNow.ToUnixTimeMilliseconds());
         await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
     }
 
