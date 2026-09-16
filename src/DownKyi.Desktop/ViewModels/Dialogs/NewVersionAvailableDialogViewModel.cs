@@ -23,7 +23,8 @@ namespace DownKyi.ViewModels.Dialogs
 
         private RelayCommand? _skipCurrentVersionCommand;
 
-        public RelayCommand SkipCurrentVersionCommand => _skipCurrentVersionCommand ??= new RelayCommand(ExecuteSkipCurrentVersionCommand);
+        public RelayCommand SkipCurrentVersionCommand => _skipCurrentVersionCommand ??=
+            new RelayCommand(ExecuteSkipCurrentVersionCommand, CanSkipCurrentVersion);
         public DownKyiAsyncDelegateCommand AllowCommand => _allowCommand ??= new DownKyiAsyncDelegateCommand(ExecuteAllowCommand, _logger);
 
         public NewVersionAvailableDialogViewModel(
@@ -46,11 +47,21 @@ namespace DownKyi.ViewModels.Dialogs
 
         private void ExecuteSkipCurrentVersionCommand()
         {
+            if (!CanSkipCurrentVersion())
+            {
+                return;
+            }
+
             _settingsStore.Update(settings => settings with
             {
                 About = settings.About with { SkipVersionOnLaunch = NewVersion }
             });
             CloseDialog(AppDialogOutcome.Canceled);
+        }
+
+        private bool CanSkipCurrentVersion()
+        {
+            return EnableSkipVersionOnLaunch;
         }
 
         private string _tagName = string.Empty;
@@ -83,7 +94,13 @@ namespace DownKyi.ViewModels.Dialogs
         public bool EnableSkipVersionOnLaunch
         {
             get => _enableSkipVersionOnLaunch;
-            set => SetProperty(ref _enableSkipVersionOnLaunch, value);
+            set
+            {
+                if (SetProperty(ref _enableSkipVersionOnLaunch, value))
+                {
+                    _skipCurrentVersionCommand?.NotifyCanExecuteChanged();
+                }
+            }
         }
 
         public override void OnDialogOpened(AppDialogRequest request)
@@ -91,7 +108,9 @@ namespace DownKyi.ViewModels.Dialogs
             ArgumentNullException.ThrowIfNull(request);
 
             var release = GetRequiredParameter<GitHubRelease>(request, "release");
-            EnableSkipVersionOnLaunch = GetRequiredParameter<bool>(request, "enableSkipVersion");
+            EnableSkipVersionOnLaunch =
+                request.Parameters?.TryGetValue("enableSkipVersion", out var enableSkipVersion) == true &&
+                enableSkipVersion is true;
             MarkdownText = release.Body;
             TagName = release.TagName;
             NewVersion = release.TagName.TrimStart('v');
