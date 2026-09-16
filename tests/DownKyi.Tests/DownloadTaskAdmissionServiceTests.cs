@@ -729,11 +729,23 @@ public sealed class DownloadTaskAdmissionServiceTests : IDisposable
                 : inner.AddAsync(task, cancellationToken);
         }
 
+        public Task<OperationResult> AddHistoryAsync(
+            DownloadHistoryRecord history,
+            CancellationToken cancellationToken) =>
+            inner.AddHistoryAsync(history, cancellationToken);
+
         public Task<OperationResult> UpdateAsync(
             DownloadTask task,
             long expectedVersion,
             CancellationToken cancellationToken) =>
             inner.UpdateAsync(task, expectedVersion, cancellationToken);
+
+        public Task<OperationResult> CompleteAsync(
+            DownloadTask task,
+            DownloadHistoryRecord history,
+            long expectedVersion,
+            CancellationToken cancellationToken) =>
+            inner.CompleteAsync(task, history, expectedVersion, cancellationToken);
 
         public Task<OperationResult> UpdateProgressAsync(
             DownloadProgressWrite progressWrite,
@@ -777,6 +789,11 @@ public sealed class DownloadTaskAdmissionServiceTests : IDisposable
         public Task<OperationResult> DeleteAsync(
             DownloadTaskId taskId,
             CancellationToken cancellationToken) => inner.DeleteAsync(taskId, cancellationToken);
+
+        public Task<OperationResult> DeleteHistoryAsync(
+            DownloadTaskId taskId,
+            CancellationToken cancellationToken) =>
+            inner.DeleteHistoryAsync(taskId, cancellationToken);
 
         public Task<OperationResult> ClearHistoryAsync(CancellationToken cancellationToken) =>
             inner.ClearHistoryAsync(cancellationToken);

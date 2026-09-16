@@ -178,11 +178,23 @@ internal static class SqliteProgressScenario
         public Task<OperationResult> AddAsync(DownloadTask task, CancellationToken cancellationToken) =>
             _inner.AddAsync(task, cancellationToken);
 
+        public Task<OperationResult> AddHistoryAsync(
+            DownloadHistoryRecord history,
+            CancellationToken cancellationToken) =>
+            _inner.AddHistoryAsync(history, cancellationToken);
+
         public Task<OperationResult> UpdateAsync(
             DownloadTask task,
             long expectedVersion,
             CancellationToken cancellationToken) =>
             _inner.UpdateAsync(task, expectedVersion, cancellationToken);
+
+        public Task<OperationResult> CompleteAsync(
+            DownloadTask task,
+            DownloadHistoryRecord history,
+            long expectedVersion,
+            CancellationToken cancellationToken) =>
+            _inner.CompleteAsync(task, history, expectedVersion, cancellationToken);
 
         public async Task<OperationResult> UpdateProgressAsync(
             DownloadProgressWrite progressWrite,
@@ -221,6 +233,11 @@ internal static class SqliteProgressScenario
         public Task<OperationResult> DeleteAsync(
             DownloadTaskId taskId,
             CancellationToken cancellationToken) => _inner.DeleteAsync(taskId, cancellationToken);
+
+        public Task<OperationResult> DeleteHistoryAsync(
+            DownloadTaskId taskId,
+            CancellationToken cancellationToken) =>
+            _inner.DeleteHistoryAsync(taskId, cancellationToken);
 
         public Task<OperationResult> ClearHistoryAsync(CancellationToken cancellationToken) =>
             _inner.ClearHistoryAsync(cancellationToken);

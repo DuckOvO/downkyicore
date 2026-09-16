@@ -143,8 +143,18 @@ public sealed class DownloadProgressWriteBehindTests
         public Task<OperationResult> AddAsync(DownloadTask task, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
+        public Task<OperationResult> AddHistoryAsync(
+            DownloadHistoryRecord history,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
         public Task<OperationResult> UpdateAsync(
             DownloadTask task,
+            long expectedVersion,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task<OperationResult> CompleteAsync(
+            DownloadTask task,
+            DownloadHistoryRecord history,
             long expectedVersion,
             CancellationToken cancellationToken) => throw new NotSupportedException();
 
@@ -189,6 +199,10 @@ public sealed class DownloadProgressWriteBehindTests
             CancellationToken cancellationToken) => throw new NotSupportedException();
 
         public Task<OperationResult> DeleteAsync(
+            DownloadTaskId taskId,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task<OperationResult> DeleteHistoryAsync(
             DownloadTaskId taskId,
             CancellationToken cancellationToken) => throw new NotSupportedException();
 

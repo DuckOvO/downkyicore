@@ -921,6 +921,11 @@ public sealed class DownloadArtifactStageTests
             return Task.FromResult(OperationResult.Success());
         }
 
+        public Task<OperationResult> AddHistoryAsync(
+            DownloadHistoryRecord history,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(OperationResult.Success());
+
         public Task<OperationResult> UpdateAsync(
             DownloadTask task,
             long expectedVersion,
@@ -934,6 +939,16 @@ public sealed class DownloadArtifactStageTests
             }
 
             _task = task;
+            return Task.FromResult(OperationResult.Success());
+        }
+
+        public Task<OperationResult> CompleteAsync(
+            DownloadTask task,
+            DownloadHistoryRecord history,
+            long expectedVersion,
+            CancellationToken cancellationToken)
+        {
+            _task = null;
             return Task.FromResult(OperationResult.Success());
         }
 
@@ -971,6 +986,11 @@ public sealed class DownloadArtifactStageTests
             Task.FromResult(new DownloadHistoryPage([], null));
 
         public Task<OperationResult> DeleteAsync(
+            DownloadTaskId taskId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(OperationResult.Success());
+
+        public Task<OperationResult> DeleteHistoryAsync(
             DownloadTaskId taskId,
             CancellationToken cancellationToken) =>
             Task.FromResult(OperationResult.Success());

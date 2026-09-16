@@ -332,6 +332,7 @@ public sealed class DownloadOrchestratorTests
     {
         private readonly Lock _sync = new();
         private readonly Dictionary<DownloadTaskId, DownloadTask> _tasks = [];
+        private readonly Dictionary<DownloadTaskId, DownloadHistoryRecord> _history = [];
 
         public Task InitializeAsync(CancellationToken cancellationToken)
         {
@@ -353,6 +354,18 @@ public sealed class DownloadOrchestratorTests
                         "Task already exists.",
                         OperationErrorKind.Conflict)));
                 }
+            }
+
+            return Task.FromResult(OperationResult.Success());
+        }
+
+        public Task<OperationResult> AddHistoryAsync(
+            DownloadHistoryRecord history,
+            CancellationToken cancellationToken)
+        {
+            lock (_sync)
+            {
+                _history[history.Id] = history;
             }
 
             return Task.FromResult(OperationResult.Success());
@@ -383,6 +396,31 @@ public sealed class DownloadOrchestratorTests
                 {
                     _tasks[task.Id] = task;
                 }
+            }
+
+            return Task.FromResult(OperationResult.Success());
+        }
+
+        public Task<OperationResult> CompleteAsync(
+            DownloadTask task,
+            DownloadHistoryRecord history,
+            long expectedVersion,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (_sync)
+            {
+                if (!_tasks.TryGetValue(task.Id, out var current) ||
+                    current.Version != expectedVersion)
+                {
+                    return Task.FromResult(OperationResult.Failure(new OperationError(
+                        "download.store.conflict",
+                        "Task version changed.",
+                        OperationErrorKind.Conflict)));
+                }
+
+                _tasks.Remove(task.Id);
+                _history[history.Id] = history;
             }
 
             return Task.FromResult(OperationResult.Success());
@@ -465,6 +503,18 @@ public sealed class DownloadOrchestratorTests
             lock (_sync)
             {
                 _tasks.Remove(taskId);
+            }
+
+            return Task.FromResult(OperationResult.Success());
+        }
+
+        public Task<OperationResult> DeleteHistoryAsync(
+            DownloadTaskId taskId,
+            CancellationToken cancellationToken)
+        {
+            lock (_sync)
+            {
+                _history.Remove(taskId);
             }
 
             return Task.FromResult(OperationResult.Success());

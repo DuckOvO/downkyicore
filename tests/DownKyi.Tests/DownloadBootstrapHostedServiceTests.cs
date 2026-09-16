@@ -834,12 +834,27 @@ public sealed class DownloadBootstrapHostedServiceTests
             return Task.FromResult(OperationResult.Success());
         }
 
+        public Task<OperationResult> AddHistoryAsync(
+            DownloadHistoryRecord history,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(OperationResult.Success());
+
         public Task<OperationResult> UpdateAsync(
             DownloadTask task,
             long expectedVersion,
             CancellationToken cancellationToken)
         {
             _tasks[task.Id] = task;
+            return Task.FromResult(OperationResult.Success());
+        }
+
+        public Task<OperationResult> CompleteAsync(
+            DownloadTask task,
+            DownloadHistoryRecord history,
+            long expectedVersion,
+            CancellationToken cancellationToken)
+        {
+            _tasks.Remove(task.Id);
             return Task.FromResult(OperationResult.Success());
         }
 
@@ -876,7 +891,7 @@ public sealed class DownloadBootstrapHostedServiceTests
             int pageSize,
             CancellationToken cancellationToken)
         {
-            return Task.FromResult(new DownloadHistoryPage(Array.Empty<DownloadTask>(), null));
+            return Task.FromResult(new DownloadHistoryPage([], null));
         }
 
         public Task<OperationResult> DeleteAsync(DownloadTaskId taskId, CancellationToken cancellationToken)
@@ -884,6 +899,11 @@ public sealed class DownloadBootstrapHostedServiceTests
             _tasks.Remove(taskId);
             return Task.FromResult(OperationResult.Success());
         }
+
+        public Task<OperationResult> DeleteHistoryAsync(
+            DownloadTaskId taskId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(OperationResult.Success());
 
         public Task<OperationResult> ClearHistoryAsync(CancellationToken cancellationToken)
         {

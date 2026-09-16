@@ -339,6 +339,8 @@ public sealed class DownloadPipelineCommitBoundaryTests
     {
         public DownloadTask? Current { get; private set; }
 
+        public DownloadHistoryRecord? History { get; private set; }
+
         public Task InitializeAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
         public Task<OperationResult> AddAsync(
@@ -347,6 +349,14 @@ public sealed class DownloadPipelineCommitBoundaryTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Current = task;
+            return Task.FromResult(OperationResult.Success());
+        }
+
+        public Task<OperationResult> AddHistoryAsync(
+            DownloadHistoryRecord history,
+            CancellationToken cancellationToken)
+        {
+            History = history;
             return Task.FromResult(OperationResult.Success());
         }
 
@@ -383,6 +393,35 @@ public sealed class DownloadPipelineCommitBoundaryTests
             }
 
             Current = task;
+            return Task.FromResult(OperationResult.Success());
+        }
+
+        public Task<OperationResult> CompleteAsync(
+            DownloadTask task,
+            DownloadHistoryRecord history,
+            long expectedVersion,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (Current == null || Current.Version != expectedVersion)
+            {
+                return Task.FromResult(OperationResult.Failure(
+                    new OperationError(
+                        "download.store.conflict",
+                        "Version conflict.",
+                        OperationErrorKind.Conflict)));
+            }
+
+            if (rejectCompletion)
+            {
+                return Task.FromResult(OperationResult.Failure(
+                    OperationError.Unexpected(
+                        "download.store.synthetic-completion-failure",
+                        "Synthetic completion persistence failure.")));
+            }
+
+            Current = null;
+            History = history;
             return Task.FromResult(OperationResult.Success());
         }
 
@@ -423,13 +462,21 @@ public sealed class DownloadPipelineCommitBoundaryTests
             int pageSize,
             CancellationToken cancellationToken) =>
             Task.FromResult(new DownloadHistoryPage(
-                Current?.Phase == DownloadPhase.Completed ? [Current] : [],
+                History == null ? [] : [History],
                 null));
 
         public Task<OperationResult> DeleteAsync(
             DownloadTaskId taskId,
             CancellationToken cancellationToken) =>
             Task.FromResult(OperationResult.Success());
+
+        public Task<OperationResult> DeleteHistoryAsync(
+            DownloadTaskId taskId,
+            CancellationToken cancellationToken)
+        {
+            History = null;
+            return Task.FromResult(OperationResult.Success());
+        }
 
         public Task<OperationResult> ClearHistoryAsync(CancellationToken cancellationToken) =>
             Task.FromResult(OperationResult.Success());
