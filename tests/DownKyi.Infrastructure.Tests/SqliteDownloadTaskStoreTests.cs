@@ -124,6 +124,48 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task LegacyMigrationPrefersRecoverableActiveTaskWhenDownloadedRowSharesId()
+    {
+        var active = CreatePausedTask(
+            "legacy-active-history-collision",
+            Path.Combine(_directory, "collision", "video"));
+        await CreateVersionThreeDatabaseAsync(active);
+        await InsertLegacyDownloadedRowAsync(active.Id.Value);
+        var before = await ReadStoredStateAsync(active.Id.Value);
+
+        using (var first = CreateStore())
+        {
+            await first.InitializeAsync(TestContext.Current.CancellationToken);
+
+            var restored = Assert.Single(
+                await first.GetUnfinishedAsync(TestContext.Current.CancellationToken));
+            Assert.Equal(active.Id, restored.Id);
+            Assert.Equal(DownloadPhase.Paused, restored.Phase);
+            Assert.Empty((await first.GetHistoryPageAsync(
+                null,
+                10,
+                TestContext.Current.CancellationToken)).Items);
+        }
+
+        Assert.Equal(before, await ReadStoredStateAsync(active.Id.Value));
+        Assert.Equal(1, await CountDownloadBaseRecordAsync(active.Id.Value));
+        Assert.Equal(1, await CountDownloadingRecordAsync(active.Id.Value));
+        Assert.False(await TableExistsAsync("downloaded"));
+        Assert.Equal(9, await ReadSchemaVersionAsync());
+
+        using var reopened = CreateStore();
+        await reopened.InitializeAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(
+            active.Id,
+            Assert.Single(await reopened.GetUnfinishedAsync(
+                TestContext.Current.CancellationToken)).Id);
+        Assert.Empty((await reopened.GetHistoryPageAsync(
+            null,
+            10,
+            TestContext.Current.CancellationToken)).Items);
+    }
+
+    [Fact]
     public async Task VersionThreeEquivalentPhysicalPathRemainsAvailableWithoutBlockingAdmission()
     {
         var originalPath = Path.Combine(_directory, "equivalent", "video");
@@ -2213,6 +2255,19 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
             task.Completion!.MaximumSpeedText ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("@finished_timestamp", task.Completion.FinishedTimestamp);
         command.Parameters.AddWithValue("@finished_time", task.Completion.FinishedTimeText);
+        await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task InsertLegacyDownloadedRowAsync(string id)
+    {
+        using var connection = await OpenConnectionAsync(readOnly: false).ConfigureAwait(false);
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO downloaded
+                (id, max_speed_display, finished_timestamp, finished_time)
+            VALUES (@id, '1 MiB/s', 1, 'legacy-finished')
+            """;
+        command.Parameters.AddWithValue("@id", id);
         await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
     }
 

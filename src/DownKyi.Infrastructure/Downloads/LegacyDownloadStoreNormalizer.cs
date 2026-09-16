@@ -68,7 +68,6 @@ internal static class LegacyDownloadStoreNormalizer
         IPhysicalOutputPathResolver physicalOutputPathResolver)
     {
         var resolutions = rows
-            .Where(row => !row.IsCompleted)
             .Select(row => ResolvePath(row, physicalOutputPathResolver))
             .ToArray();
         var aliasedPhysicalKeys = resolutions

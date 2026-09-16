@@ -147,6 +147,24 @@ internal static class CurrentDownloadStoreWriter
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
+            DELETE FROM download_quarantine
+            WHERE source_table = 'downloaded'
+              AND record_id IN (SELECT id FROM downloading)
+              AND EXISTS (
+                  SELECT 1
+                  FROM download_quarantine active_quarantine
+                  WHERE active_quarantine.source_table = 'downloading'
+                    AND active_quarantine.record_id = download_quarantine.record_id
+              );
+
+            UPDATE download_quarantine
+            SET source_table = 'downloading'
+            WHERE source_table = 'downloaded'
+              AND record_id IN (SELECT id FROM downloading);
+
+            DELETE FROM downloaded
+            WHERE id IN (SELECT id FROM downloading);
+
             INSERT INTO download_history
                 (id, cid, zone_id, [order], main_title, name, duration,
                  video_codec_name, resolution, audio_codec, file_size,
