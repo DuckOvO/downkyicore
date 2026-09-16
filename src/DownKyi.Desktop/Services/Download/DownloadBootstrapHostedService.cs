@@ -97,18 +97,7 @@ internal sealed class DownloadBootstrapHostedService : IHostedService, IDisposab
             startupTasks = state.UnfinishedTasks.Where(task => !blocked.Contains(task.Id)).ToArray();
             if (_staging != null)
             {
-                var knownTasks = new List<DownloadTask>(state.UnfinishedTasks);
-                DownloadHistoryCursor? cursor = null;
-                do
-                {
-                    var page = await _projectionStore.GetDownloadedPageAsync(
-                        cursor, 500, cancellationToken).ConfigureAwait(false);
-                    knownTasks.AddRange(page.Items);
-                    cursor = page.NextCursor;
-                }
-                while (cursor != null);
-
-                _staging.CleanupStale(knownTasks);
+                _staging.CleanupStale(state.UnfinishedTasks);
             }
             await _uiDispatcher.InvokeAsync(() =>
             {

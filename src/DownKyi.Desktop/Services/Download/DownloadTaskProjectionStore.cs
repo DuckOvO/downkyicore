@@ -75,26 +75,14 @@ internal sealed class DownloadTaskProjectionStore : IDisposable
             tasks.Select(CreateDownloadingProjection).ToArray());
     }
 
-    public async Task AddMigratedCompletedAsync(
-        DownloadTask task,
+    public async Task AddMigratedHistoryAsync(
+        DownloadHistoryRecord history,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(task);
-        if (task.Phase != DownloadPhase.Completed)
-        {
-            throw new ArgumentException("A migrated history task must be completed.", nameof(task));
-        }
-
-        var result = await _tasks.AddAsync(task, cancellationToken).ConfigureAwait(true);
+        ArgumentNullException.ThrowIfNull(history);
+        var result = await _tasks.AddHistoryAsync(history, cancellationToken).ConfigureAwait(true);
         if (result.IsSuccess)
         {
-            return;
-        }
-
-        var existing = await _tasks.FindAsync(task.Id, cancellationToken).ConfigureAwait(true);
-        if (existing?.Phase == DownloadPhase.Completed)
-        {
-            Publish(existing);
             return;
         }
 
@@ -111,7 +99,7 @@ internal sealed class DownloadTaskProjectionStore : IDisposable
         }
 
         var result = await _tasks
-            .DeleteAsync(new DownloadTaskId(downloadedItem.DownloadBase.Id), cancellationToken)
+            .DeleteHistoryAsync(downloadedItem.HistoryRecord.Id, cancellationToken)
             .ConfigureAwait(true);
         RequireSuccess(result.IsSuccess, result.Error?.Message);
     }
@@ -124,11 +112,6 @@ internal sealed class DownloadTaskProjectionStore : IDisposable
         var page = await _tasks
             .GetHistoryPageAsync(cursor, pageSize, cancellationToken)
             .ConfigureAwait(true);
-        foreach (var task in page.Items)
-        {
-            _snapshots[task.Id] = task;
-        }
-
         return page;
     }
 
@@ -191,7 +174,8 @@ internal sealed class DownloadTaskProjectionStore : IDisposable
     public static DownloadedItem CreateDownloadedProjection(DownloadTask task)
     {
         ArgumentNullException.ThrowIfNull(task);
-        return DownloadTaskProjectionMapper.ToDownloadedItem(task);
+        return DownloadTaskProjectionMapper.ToDownloadedItem(
+            DownloadHistoryRecord.FromCompletedTask(task));
     }
 
     public void Dispose()
@@ -219,14 +203,6 @@ internal sealed class DownloadTaskProjectionStore : IDisposable
     {
         if (args.Kind == DownloadTaskChangeKind.HistoryCleared)
         {
-            foreach (var completed in _snapshots
-                         .Where(entry => entry.Value.Phase == DownloadPhase.Completed)
-                         .Select(entry => entry.Key)
-                         .ToArray())
-            {
-                _snapshots.TryRemove(completed, out _);
-            }
-
             return;
         }
 
@@ -245,7 +221,14 @@ internal sealed class DownloadTaskProjectionStore : IDisposable
 
     private void Publish(DownloadTask task)
     {
-        _snapshots[task.Id] = task;
+        if (task.Phase == DownloadPhase.Completed)
+        {
+            _snapshots.TryRemove(task.Id, out _);
+        }
+        else
+        {
+            _snapshots[task.Id] = task;
+        }
         if (_downloadingProjections.TryGetValue(task.Id, out var item))
         {
             DownloadTaskProjectionMapper.Apply(task, item);

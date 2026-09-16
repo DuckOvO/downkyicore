@@ -9,8 +9,18 @@ public interface IDownloadTaskStore
 
     Task<OperationResult> AddAsync(DownloadTask task, CancellationToken cancellationToken);
 
+    Task<OperationResult> AddHistoryAsync(
+        DownloadHistoryRecord history,
+        CancellationToken cancellationToken);
+
     Task<OperationResult> UpdateAsync(
         DownloadTask task,
+        long expectedVersion,
+        CancellationToken cancellationToken);
+
+    Task<OperationResult> CompleteAsync(
+        DownloadTask task,
+        DownloadHistoryRecord history,
         long expectedVersion,
         CancellationToken cancellationToken);
 
@@ -44,6 +54,10 @@ public interface IDownloadTaskStore
         CancellationToken cancellationToken);
 
     Task<OperationResult> DeleteAsync(DownloadTaskId taskId, CancellationToken cancellationToken);
+
+    Task<OperationResult> DeleteHistoryAsync(
+        DownloadTaskId taskId,
+        CancellationToken cancellationToken);
 
     Task<OperationResult> ClearHistoryAsync(CancellationToken cancellationToken);
 

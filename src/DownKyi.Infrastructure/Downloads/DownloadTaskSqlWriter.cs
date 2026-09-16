@@ -68,16 +68,13 @@ internal static class DownloadTaskSqlWriter
         DownloadTask task,
         CancellationToken cancellationToken)
     {
-        if (task.Phase == DownloadPhase.Completed)
+        if (task.Phase is DownloadPhase.Completed or DownloadPhase.Deleted)
         {
-            await DeleteStateRowAsync(connection, transaction, false, task.Id, cancellationToken)
-                .ConfigureAwait(false);
-            await UpsertDownloadedAsync(connection, transaction, task, cancellationToken).ConfigureAwait(false);
-            return;
+            throw new ArgumentException(
+                "Only recoverable download tasks have active state rows.",
+                nameof(task));
         }
 
-        await DeleteStateRowAsync(connection, transaction, true, task.Id, cancellationToken)
-            .ConfigureAwait(false);
         await UpsertDownloadingAsync(connection, transaction, task, cancellationToken).ConfigureAwait(false);
     }
 
@@ -210,53 +207,6 @@ internal static class DownloadTaskSqlWriter
             "@failure_transient",
             task.Failure == null ? DBNull.Value : task.Failure.IsTransient ? 1 : 0);
         BindProgress(command, task.Progress);
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    private static async Task UpsertDownloadedAsync(
-        SqliteConnection connection,
-        SqliteTransaction transaction,
-        DownloadTask task,
-        CancellationToken cancellationToken)
-    {
-        var completion = task.Completion
-            ?? throw new InvalidOperationException("Completed download has no completion details.");
-        using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            INSERT INTO downloaded (id, max_speed_display, finished_timestamp, finished_time)
-            VALUES (@id, @max_speed_display, @finished_timestamp, @finished_time)
-            ON CONFLICT(id) DO UPDATE SET
-                max_speed_display = excluded.max_speed_display,
-                finished_timestamp = excluded.finished_timestamp,
-                finished_time = excluded.finished_time
-            """;
-        command.Parameters.AddWithValue("@id", task.Id.Value);
-        command.Parameters.AddWithValue("@max_speed_display", completion.MaximumSpeedText ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("@finished_timestamp", completion.FinishedTimestamp);
-        command.Parameters.AddWithValue("@finished_time", completion.FinishedTimeText);
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    private static async Task DeleteStateRowAsync(
-        SqliteConnection connection,
-        SqliteTransaction transaction,
-        bool completed,
-        DownloadTaskId taskId,
-        CancellationToken cancellationToken)
-    {
-        using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        if (completed)
-        {
-            command.CommandText = "DELETE FROM downloaded WHERE id = @id";
-        }
-        else
-        {
-            command.CommandText = "DELETE FROM downloading WHERE id = @id";
-        }
-
-        command.Parameters.AddWithValue("@id", taskId.Value);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 

@@ -29,6 +29,14 @@ public sealed partial class DownloadTaskApplicationService : IDownloadTaskApplic
     {
         ArgumentNullException.ThrowIfNull(task);
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (task.Phase is DownloadPhase.Completed or DownloadPhase.Deleted)
+        {
+            return OperationResult.Failure<DownloadTask>(new OperationError(
+                "download.task.not_recoverable",
+                "Completed or deleted downloads cannot be added as recoverable tasks.",
+                OperationErrorKind.Validation));
+        }
+
         if (task.Phase == DownloadPhase.Queued)
         {
             var admission = await CheckNewDownloadAdmissionAsync(cancellationToken)
@@ -47,6 +55,15 @@ public sealed partial class DownloadTaskApplicationService : IDownloadTaskApplic
 
         Publish(task, DownloadTaskChangeKind.Added);
         return OperationResult.Success(task);
+    }
+
+    public Task<OperationResult> AddHistoryAsync(
+        DownloadHistoryRecord history,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(history);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _store.AddHistoryAsync(history, cancellationToken);
     }
 
     public async Task<OperationResult> CheckNewDownloadAdmissionAsync(
@@ -346,6 +363,15 @@ public sealed partial class DownloadTaskApplicationService : IDownloadTaskApplic
         CancellationToken cancellationToken) =>
         MutateAsync(taskId, static (task, now) => task.Delete(now), cancellationToken);
 
+    public Task<OperationResult> DeleteHistoryAsync(
+        DownloadTaskId taskId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(taskId);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _store.DeleteHistoryAsync(taskId, cancellationToken);
+    }
+
     public async Task<OperationResult> ClearHistoryAsync(CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -424,9 +450,16 @@ public sealed partial class DownloadTaskApplicationService : IDownloadTaskApplic
                     return transitionResult;
                 }
 
-                var storeResult = await _store
-                    .UpdateAsync(updated, current.Version, cancellationToken)
-                    .ConfigureAwait(false);
+                var storeResult = updated.Phase == DownloadPhase.Completed
+                    ? await _store.CompleteAsync(
+                            updated,
+                            DownloadHistoryRecord.FromCompletedTask(updated),
+                            current.Version,
+                            cancellationToken)
+                        .ConfigureAwait(false)
+                    : await _store
+                        .UpdateAsync(updated, current.Version, cancellationToken)
+                        .ConfigureAwait(false);
                 if (storeResult.IsSuccess)
                 {
                     Publish(

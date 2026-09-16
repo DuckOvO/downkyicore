@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Immutable;
 using System.Linq;
+using DownKyi.Application.Downloads;
 using DownKyi.Core.BiliApi.BiliUtils;
 using DownKyi.Core.BiliApi.VideoStream;
 using DownKyi.Domain.Downloads;
@@ -48,21 +49,20 @@ internal static class DownloadTaskProjectionMapper
         return item;
     }
 
-    public static DownloadedItem ToDownloadedItem(DownloadTask task)
+    public static DownloadedItem ToDownloadedItem(DownloadHistoryRecord history)
     {
-        ArgumentNullException.ThrowIfNull(task);
-        var completion = task.Completion
-            ?? throw new InvalidOperationException("Completed download is missing completion details.");
-        var downloadBase = ToDownloadBase(task);
+        ArgumentNullException.ThrowIfNull(history);
+        var downloadBase = ToDownloadBase(history);
         return new DownloadedItem
         {
             DownloadBase = downloadBase,
+            HistoryRecord = history,
             Downloaded = new Downloaded
             {
-                Id = task.Id.Value,
-                MaxSpeedDisplay = completion.MaximumSpeedText,
-                FinishedTimestamp = completion.FinishedTimestamp,
-                FinishedTime = completion.FinishedTimeText,
+                Id = history.Id.Value,
+                MaxSpeedDisplay = history.MaximumSpeedText,
+                FinishedTimestamp = history.FinishedTimestamp,
+                FinishedTime = history.FinishedTimeText,
                 DownloadBase = downloadBase
             }
         };
@@ -223,6 +223,31 @@ internal static class DownloadTaskProjectionMapper
             FilePath = task.Output.BasePath,
             FileSize = task.Output.FileSizeText,
             Page = task.Metadata.Media.Page
+        };
+    }
+
+    private static DownloadBase ToDownloadBase(DownloadHistoryRecord history)
+    {
+        return new DownloadBase
+        {
+            Id = history.Id.Value,
+            Cid = history.Cid,
+            ZoneId = history.ZoneId,
+            Order = history.Order,
+            MainTitle = history.MainTitle,
+            Name = history.Name,
+            Duration = history.DurationText,
+            VideoCodecName = history.VideoCodecName,
+            Resolution = new Quality
+            {
+                Id = history.ResolutionId,
+                Name = history.ResolutionName
+            },
+            AudioCodec = new Quality
+            {
+                Name = history.AudioCodecName
+            },
+            FileSize = history.FileSizeText
         };
     }
 

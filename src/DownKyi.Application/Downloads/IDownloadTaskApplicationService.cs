@@ -11,6 +11,10 @@ public interface IDownloadTaskApplicationService
         DownloadTask task,
         CancellationToken cancellationToken);
 
+    Task<OperationResult> AddHistoryAsync(
+        DownloadHistoryRecord history,
+        CancellationToken cancellationToken);
+
     Task<OperationResult> CheckNewDownloadAdmissionAsync(
         CancellationToken cancellationToken);
 
@@ -151,6 +155,10 @@ public interface IDownloadTaskApplicationService
         CancellationToken cancellationToken);
 
     Task<OperationResult<DownloadTask>> DeleteAsync(
+        DownloadTaskId taskId,
+        CancellationToken cancellationToken);
+
+    Task<OperationResult> DeleteHistoryAsync(
         DownloadTaskId taskId,
         CancellationToken cancellationToken);
 
