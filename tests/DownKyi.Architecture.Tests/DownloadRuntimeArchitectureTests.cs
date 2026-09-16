@@ -721,6 +721,12 @@ public sealed class DownloadRuntimeArchitectureTests
         var finalizeSource = File.ReadAllText(Path.Combine(
             downloadDirectory,
             "FinalizeStage.cs"));
+        var bootstrapSource = File.ReadAllText(Path.Combine(
+            downloadDirectory,
+            "DownloadBootstrapHostedService.cs"));
+        var stagingSource = File.ReadAllText(Path.Combine(
+            downloadDirectory,
+            "DownloadTaskStaging.cs"));
 
         Assert.DoesNotContain("DeleteInput", processorSource, StringComparison.Ordinal);
         Assert.DoesNotContain("DeleteSourceSegments", concatSource, StringComparison.Ordinal);
@@ -728,6 +734,8 @@ public sealed class DownloadRuntimeArchitectureTests
             finalizeSource.IndexOf("_stateWriter.CompleteAsync", StringComparison.Ordinal) <
             finalizeSource.IndexOf("_fileService.CleanupStaging", StringComparison.Ordinal));
         Assert.DoesNotContain("DeleteTransferFilesAsync", finalizeSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("CleanupStale", bootstrapSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("CleanupStale", stagingSource, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryRoot()

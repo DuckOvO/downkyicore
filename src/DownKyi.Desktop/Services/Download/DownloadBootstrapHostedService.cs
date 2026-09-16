@@ -95,10 +95,6 @@ internal sealed class DownloadBootstrapHostedService : IHostedService, IDisposab
             }
 
             startupTasks = state.UnfinishedTasks.Where(task => !blocked.Contains(task.Id)).ToArray();
-            if (_staging != null)
-            {
-                _staging.CleanupStale(state.UnfinishedTasks);
-            }
             await _uiDispatcher.InvokeAsync(() =>
             {
                 _downloadLists.AddDownloadingRange(state.DownloadingItems);

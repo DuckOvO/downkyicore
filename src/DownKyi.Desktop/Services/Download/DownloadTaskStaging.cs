@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using DownKyi.Application.Diagnostics;
@@ -126,34 +125,6 @@ internal sealed class DownloadTaskStaging
             {
                 _logger.LogWarningMessage("Task-private staging cleanup could not complete.", exception);
                 return false;
-            }
-        }
-    }
-
-    public void CleanupStale(IEnumerable<DownloadTask> tasks)
-    {
-        foreach (var task in tasks.Where(task => task.Phase == DownloadPhase.Completed))
-        {
-            var root = GetRoot(task.Output.BasePath);
-            var sessionDirectory = Path.Combine(root, task.Output.StagingToken);
-            if (!Directory.Exists(sessionDirectory))
-            {
-                continue;
-            }
-
-            try
-            {
-                EnsureOrdinaryStagingPath(root, sessionDirectory);
-                using (new FileStream(Path.Combine(sessionDirectory, ".session-lock"),
-                           FileMode.Open, FileAccess.ReadWrite, FileShare.None))
-                {
-                }
-
-                TryDelete(sessionDirectory, root);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                _logger.LogWarningMessage("Stale staging is still in use or unavailable.", exception);
             }
         }
     }
