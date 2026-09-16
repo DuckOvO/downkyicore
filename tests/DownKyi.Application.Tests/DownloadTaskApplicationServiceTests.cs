@@ -13,7 +13,7 @@ public sealed class DownloadTaskApplicationServiceTests
     public async Task CommandsPersistAggregateBeforePublishingProjectionEvent()
     {
         var store = new RecordingStore();
-        using var service = new DownloadTaskApplicationService(store, new AdvancingClock());
+        using var service = new DownloadTaskApplicationService(store, DownloadHistoryService.CreateForSharedStore(store), new AdvancingClock());
         var publishedVersions = new List<long>();
         service.TaskChanged += (_, args) =>
         {
@@ -54,7 +54,7 @@ public sealed class DownloadTaskApplicationServiceTests
     public async Task ShutdownRecoveryPreservesResumeStateAndOptimisticVersion()
     {
         var store = new RecordingStore();
-        using var service = new DownloadTaskApplicationService(store, new AdvancingClock());
+        using var service = new DownloadTaskApplicationService(store, DownloadHistoryService.CreateForSharedStore(store), new AdvancingClock());
         var task = CreateTask();
         await service.AddAsync(task, TestContext.Current.CancellationToken);
         await service.StartAsync(task.Id, TestContext.Current.CancellationToken);
@@ -84,7 +84,7 @@ public sealed class DownloadTaskApplicationServiceTests
     public async Task InterruptedReconciliationPreservesNewerPauseIntent()
     {
         var store = new RecordingStore();
-        using var service = new DownloadTaskApplicationService(store, new AdvancingClock());
+        using var service = new DownloadTaskApplicationService(store, DownloadHistoryService.CreateForSharedStore(store), new AdvancingClock());
         var task = CreateTask();
         await service.AddAsync(task, TestContext.Current.CancellationToken);
         var snapshot = (await service.StartAsync(
@@ -107,7 +107,7 @@ public sealed class DownloadTaskApplicationServiceTests
     public async Task ArtifactClaimsPreservePriorPathsAndBackendIdentity()
     {
         var store = new RecordingStore();
-        using var service = new DownloadTaskApplicationService(store, new AdvancingClock());
+        using var service = new DownloadTaskApplicationService(store, DownloadHistoryService.CreateForSharedStore(store), new AdvancingClock());
         var task = CreateTask();
         await service.AddAsync(task, TestContext.Current.CancellationToken);
         await service.StartAsync(task.Id, TestContext.Current.CancellationToken);
@@ -144,7 +144,7 @@ public sealed class DownloadTaskApplicationServiceTests
     public async Task InvalidatingCompletedFileAlsoClearsBackendIdentity()
     {
         var store = new RecordingStore();
-        using var service = new DownloadTaskApplicationService(store, new AdvancingClock());
+        using var service = new DownloadTaskApplicationService(store, DownloadHistoryService.CreateForSharedStore(store), new AdvancingClock());
         var task = CreateTask();
         await service.AddAsync(task, TestContext.Current.CancellationToken);
         await service.StartAsync(task.Id, TestContext.Current.CancellationToken);
@@ -177,7 +177,7 @@ public sealed class DownloadTaskApplicationServiceTests
     public async Task InvalidatingCompletedFilesUsesOneDurableMutation()
     {
         var store = new RecordingStore();
-        using var service = new DownloadTaskApplicationService(store, new AdvancingClock());
+        using var service = new DownloadTaskApplicationService(store, DownloadHistoryService.CreateForSharedStore(store), new AdvancingClock());
         var task = CreateTask();
         await service.AddAsync(task, TestContext.Current.CancellationToken);
         await service.StartAsync(task.Id, TestContext.Current.CancellationToken);
@@ -222,7 +222,7 @@ public sealed class DownloadTaskApplicationServiceTests
     public async Task InvalidCommandDoesNotPersistOrPublishAReplacementSnapshot()
     {
         var store = new RecordingStore();
-        using var service = new DownloadTaskApplicationService(store, new AdvancingClock());
+        using var service = new DownloadTaskApplicationService(store, DownloadHistoryService.CreateForSharedStore(store), new AdvancingClock());
         var task = CreateTask();
         await service.AddAsync(task, TestContext.Current.CancellationToken);
         var eventCount = 0;
@@ -240,10 +240,35 @@ public sealed class DownloadTaskApplicationServiceTests
     }
 
     [Fact]
+    public async Task CompletingTaskAtomicallyReplacesRecoverableStateWithLossyHistoryRecord()
+    {
+        var store = new RecordingStore();
+        using var service = new DownloadTaskApplicationService(store, DownloadHistoryService.CreateForSharedStore(store), new AdvancingClock());
+        var task = CreateTask();
+        await service.AddAsync(task, TestContext.Current.CancellationToken);
+        var started = (await service.StartAsync(
+            task.Id,
+            TestContext.Current.CancellationToken)).RequireValue();
+
+        var completed = (await service.CompleteAsync(
+            task.Id,
+            new DownloadCompletion(123, "finished", "24 Mbps"),
+            TestContext.Current.CancellationToken)).RequireValue();
+
+        Assert.Null(store.Current);
+        Assert.Equal(started.Version, store.CompletionExpectedVersion);
+        Assert.NotNull(store.CompletedHistory);
+        Assert.Equivalent(
+            DownloadHistoryRecord.FromCompletedTask(completed),
+            store.CompletedHistory,
+            strict: true);
+    }
+
+    [Fact]
     public async Task LegacyUpgradeAdmissionStateAndConfirmationDelegateToStore()
     {
         var store = new RecordingStore { LegacyUpgradeAdmissionBlocked = true };
-        using var service = new DownloadTaskApplicationService(store, new AdvancingClock());
+        using var service = new DownloadTaskApplicationService(store, DownloadHistoryService.CreateForSharedStore(store), new AdvancingClock());
 
         Assert.True(await service.IsLegacyUpgradeAdmissionBlockedAsync(
             TestContext.Current.CancellationToken));
@@ -259,7 +284,7 @@ public sealed class DownloadTaskApplicationServiceTests
     public async Task BlockedLegacyUpgradeRejectsQueuedTaskBeforeStoreAddAndAllowsSameSessionAfterConfirmation()
     {
         var store = new RecordingStore { LegacyUpgradeAdmissionBlocked = true };
-        using var service = new DownloadTaskApplicationService(store, new AdvancingClock());
+        using var service = new DownloadTaskApplicationService(store, DownloadHistoryService.CreateForSharedStore(store), new AdvancingClock());
 
         var admission = await service.CheckNewDownloadAdmissionAsync(
             TestContext.Current.CancellationToken);
@@ -283,20 +308,22 @@ public sealed class DownloadTaskApplicationServiceTests
     }
 
     [Fact]
-    public async Task BlockedLegacyUpgradeDoesNotRejectCompletedHistoryImport()
+    public async Task BlockedLegacyUpgradeDoesNotRejectExplicitHistoryImport()
     {
         var store = new RecordingStore { LegacyUpgradeAdmissionBlocked = true };
-        using var service = new DownloadTaskApplicationService(store, new AdvancingClock());
+        var historyService = DownloadHistoryService.CreateForSharedStore(store);
         var started = CreateTask().Start(Epoch.AddSeconds(1)).RequireValue();
         var completed = started.Complete(
             new DownloadCompletion(1, "finished", null),
             Epoch.AddSeconds(2)).RequireValue();
 
-        var result = await service.AddAsync(completed, TestContext.Current.CancellationToken);
+        var history = DownloadHistoryRecord.FromCompletedTask(completed);
+        var result = await historyService.AddAsync(history, TestContext.Current.CancellationToken);
 
         Assert.True(result.IsSuccess);
-        Assert.Equal(1, store.AddCount);
-        Assert.Same(completed, store.Current);
+        Assert.Equal(0, store.AddCount);
+        Assert.Same(history, store.AddedHistory);
+        Assert.Null(store.Current);
         Assert.True(store.LegacyUpgradeAdmissionBlocked);
     }
 
@@ -345,7 +372,10 @@ public sealed class DownloadTaskApplicationServiceTests
         }
     }
 
-    private sealed class RecordingStore : IDownloadTaskStore
+    private sealed class RecordingStore :
+        IDownloadTaskStore,
+        IDownloadHistoryStore,
+        IDownloadCompletionStore
     {
         private readonly Lock _sync = new();
 
@@ -358,6 +388,12 @@ public sealed class DownloadTaskApplicationServiceTests
         public int LegacyRemoteStopConfirmationCount { get; private set; }
 
         public int AddCount { get; private set; }
+
+        public DownloadHistoryRecord? AddedHistory { get; private set; }
+
+        public DownloadHistoryRecord? CompletedHistory { get; private set; }
+
+        public long? CompletionExpectedVersion { get; private set; }
 
         public Task InitializeAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
@@ -380,6 +416,14 @@ public sealed class DownloadTaskApplicationServiceTests
             }
         }
 
+        public Task<OperationResult> AddHistoryAsync(
+            DownloadHistoryRecord history,
+            CancellationToken cancellationToken)
+        {
+            AddedHistory = history;
+            return Task.FromResult(OperationResult.Success());
+        }
+
         public Task<OperationResult> UpdateAsync(
             DownloadTask task,
             long expectedVersion,
@@ -400,6 +444,19 @@ public sealed class DownloadTaskApplicationServiceTests
                 Current = task.Phase == DownloadPhase.Deleted ? null : task;
                 return Task.FromResult(OperationResult.Success());
             }
+        }
+
+        public Task<OperationResult> CompleteAsync(
+            DownloadTask task,
+            DownloadHistoryRecord history,
+            long expectedVersion,
+            CancellationToken cancellationToken)
+        {
+            ExpectedVersions.Add(expectedVersion);
+            CompletedHistory = history;
+            CompletionExpectedVersion = expectedVersion;
+            Current = null;
+            return Task.FromResult(OperationResult.Success());
         }
 
         public Task<OperationResult> UpdateProgressAsync(
@@ -456,6 +513,11 @@ public sealed class DownloadTaskApplicationServiceTests
             Current = null;
             return Task.FromResult(OperationResult.Success());
         }
+
+        public Task<OperationResult> DeleteHistoryAsync(
+            DownloadTaskId taskId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(OperationResult.Success());
 
         public Task<OperationResult> ClearHistoryAsync(CancellationToken cancellationToken) =>
             Task.FromResult(OperationResult.Success());

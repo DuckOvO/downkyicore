@@ -42,8 +42,12 @@ public sealed class DownloadTaskFileServiceTests : IDisposable
         using (var store = CreateStore(databasePath))
         {
             await store.InitializeAsync(TestContext.Current.CancellationToken);
-            using var tasks = new DownloadTaskApplicationService(store, new SystemClock());
-            using var projections = new DownloadTaskProjectionStore(tasks, new SystemClock());
+            var historyService = DownloadHistoryService.CreateForSharedStore(store);
+            using var tasks = new DownloadTaskApplicationService(store, historyService, new SystemClock());
+            using var projections = new DownloadTaskProjectionStore(
+                tasks,
+                historyService,
+                new SystemClock());
             await projections.AddDownloadingAsync(item, TestContext.Current.CancellationToken);
             var writer = new DownloadTaskStateWriter(tasks);
             await writer.StartAsync(taskId, TestContext.Current.CancellationToken);
@@ -103,7 +107,7 @@ public sealed class DownloadTaskFileServiceTests : IDisposable
 
         using var reopenedStore = CreateStore(databasePath);
         await reopenedStore.InitializeAsync(TestContext.Current.CancellationToken);
-        using var reopenedTasks = new DownloadTaskApplicationService(reopenedStore, new SystemClock());
+        using var reopenedTasks = new DownloadTaskApplicationService(reopenedStore, DownloadHistoryService.CreateForSharedStore(reopenedStore), new SystemClock());
         var reopenedWriter = new DownloadTaskStateWriter(reopenedTasks);
         var reopenedStaging = new DownloadTaskStaging(NullLogger<DownloadTaskStaging>.Instance);
         var reopenedService = new DownloadTaskFileService(new AriaRuntimeClientRegistry(),

@@ -71,16 +71,11 @@ internal static class CurrentDownloadStoreWriter
                     bytes_per_second       INTEGER NOT NULL DEFAULT 0
                 );
 
-                CREATE TABLE downloaded (
-                    id                 TEXT PRIMARY KEY REFERENCES download_base(id) ON DELETE CASCADE,
-                    max_speed_display  TEXT,
-                    finished_timestamp INTEGER NOT NULL DEFAULT 0,
-                    finished_time      TEXT NOT NULL DEFAULT ''
-                );
                 """;
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
+        await CreateHistoryTableAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
         await EnsureSupportTablesAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
         await EnsureIndexesAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
         await CompleteAsync(connection, transaction, appliedAtUtc, cancellationToken).ConfigureAwait(false);
@@ -97,6 +92,8 @@ internal static class CurrentDownloadStoreWriter
         await EnsureSupportTablesAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
         await AddMissingColumnsAsync(connection, transaction, format, cancellationToken)
             .ConfigureAwait(false);
+        await CreateHistoryTableAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        await ProjectLegacyHistoryAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
         await ApplyPhaseUpdatesAsync(connection, transaction, plan.PhaseUpdates, cancellationToken)
             .ConfigureAwait(false);
         await ApplyReservationUpdatesAsync(connection, transaction, plan.ReservationUpdates, cancellationToken)
@@ -111,6 +108,76 @@ internal static class CurrentDownloadStoreWriter
             cancellationToken).ConfigureAwait(false);
         await EnsureIndexesAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
         await CompleteAsync(connection, transaction, appliedAtUtc, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task CreateHistoryTableAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            CREATE TABLE download_history (
+                id                    TEXT PRIMARY KEY,
+                cid                   INTEGER NOT NULL DEFAULT 0,
+                zone_id               INTEGER NOT NULL DEFAULT 0,
+                [order]               INTEGER NOT NULL DEFAULT 0,
+                main_title            TEXT NOT NULL DEFAULT '',
+                name                  TEXT NOT NULL DEFAULT '',
+                duration              TEXT NOT NULL DEFAULT '',
+                video_codec_name      TEXT NOT NULL DEFAULT '',
+                resolution            TEXT NOT NULL DEFAULT '{}',
+                audio_codec           TEXT,
+                file_size             TEXT,
+                published_artifacts   TEXT NOT NULL DEFAULT '{}',
+                finished_timestamp    INTEGER NOT NULL DEFAULT 0,
+                finished_time         TEXT NOT NULL DEFAULT '',
+                max_speed_display     TEXT
+            )
+            """;
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task ProjectLegacyHistoryAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            DELETE FROM download_quarantine
+            WHERE source_table = 'downloaded'
+              AND record_id IN (SELECT id FROM downloading);
+
+            DELETE FROM downloaded
+            WHERE id IN (SELECT id FROM downloading);
+
+            INSERT INTO download_history
+                (id, cid, zone_id, [order], main_title, name, duration,
+                 video_codec_name, resolution, audio_codec, file_size,
+                 published_artifacts, finished_timestamp, finished_time,
+                 max_speed_display)
+            SELECT
+                db.id, db.cid, db.zone_id, db.[order], db.main_title, db.name,
+                db.duration, db.video_codec_name, db.resolution, db.audio_codec,
+                db.file_size, db.published_artifacts, d.finished_timestamp,
+                d.finished_time, d.max_speed_display
+            FROM download_base db
+            INNER JOIN downloaded d ON d.id = db.id;
+
+            UPDATE download_quarantine
+            SET source_table = 'download_history'
+            WHERE source_table = 'downloaded'
+              AND record_id IN (SELECT id FROM downloaded);
+
+            DELETE FROM download_base
+            WHERE id IN (SELECT id FROM downloaded);
+
+            DROP TABLE downloaded;
+            """;
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task EnsureSupportTablesAsync(
@@ -344,8 +411,8 @@ internal static class CurrentDownloadStoreWriter
         command.CommandText = """
             CREATE INDEX IF NOT EXISTS ix_downloading_status
                 ON downloading(download_status);
-            CREATE INDEX IF NOT EXISTS ix_downloaded_finished_timestamp
-                ON downloaded(finished_timestamp DESC, id DESC);
+            CREATE INDEX IF NOT EXISTS ix_download_history_finished_timestamp
+                ON download_history(finished_timestamp DESC, id DESC);
             CREATE INDEX IF NOT EXISTS ix_download_base_main_title_order
                 ON download_base(main_title, [order]);
             CREATE INDEX IF NOT EXISTS ix_download_base_file_path

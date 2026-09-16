@@ -6,7 +6,7 @@ namespace DownKyi.Infrastructure.Downloads;
 
 internal static class DownloadStoreSchema
 {
-    public const int CurrentVersion = 8;
+    public const int CurrentVersion = 9;
 
     public static async Task InitializeAsync(
         SqliteConnection connection,

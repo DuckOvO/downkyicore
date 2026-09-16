@@ -206,8 +206,12 @@ public sealed class MuxFailureRecoveryTests
             var settings = new TestSettingsStore();
             var store = new SingleTaskStore();
             var clock = new SystemClock();
-            var tasks = new DownloadTaskApplicationService(store, clock);
-            var projectionStore = new DownloadTaskProjectionStore(tasks, clock);
+            var historyService = DownloadHistoryService.CreateForSharedStore(store);
+            var tasks = new DownloadTaskApplicationService(store, historyService, clock);
+            var projectionStore = new DownloadTaskProjectionStore(
+                tasks,
+                historyService,
+                clock);
             var stateWriter = new DownloadTaskStateWriter(tasks);
             var taskId = new DownloadTaskId("mux-recovery");
             var downloadBase = new DownloadBase
@@ -383,7 +387,10 @@ public sealed class MuxFailureRecoveryTests
 
     private sealed record DurlTestSource(int Order, string TransferKey, string FilePath);
 
-    private sealed class SingleTaskStore : IDownloadTaskStore
+    private sealed class SingleTaskStore :
+        IDownloadTaskStore,
+        IDownloadHistoryStore,
+        IDownloadCompletionStore
     {
         private DownloadTask? _task;
 
@@ -397,6 +404,11 @@ public sealed class MuxFailureRecoveryTests
             _task = task;
             return Task.FromResult(OperationResult.Success());
         }
+
+        public Task<OperationResult> AddHistoryAsync(
+            DownloadHistoryRecord history,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(OperationResult.Success());
 
         public Task<OperationResult> UpdateAsync(
             DownloadTask task,
@@ -414,6 +426,16 @@ public sealed class MuxFailureRecoveryTests
             }
 
             _task = task;
+            return Task.FromResult(OperationResult.Success());
+        }
+
+        public Task<OperationResult> CompleteAsync(
+            DownloadTask task,
+            DownloadHistoryRecord history,
+            long expectedVersion,
+            CancellationToken cancellationToken)
+        {
+            _task = null;
             return Task.FromResult(OperationResult.Success());
         }
 
@@ -451,6 +473,11 @@ public sealed class MuxFailureRecoveryTests
             Task.FromResult(new DownloadHistoryPage([], null));
 
         public Task<OperationResult> DeleteAsync(
+            DownloadTaskId taskId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(OperationResult.Success());
+
+        public Task<OperationResult> DeleteHistoryAsync(
             DownloadTaskId taskId,
             CancellationToken cancellationToken) =>
             Task.FromResult(OperationResult.Success());

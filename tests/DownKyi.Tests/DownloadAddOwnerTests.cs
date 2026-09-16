@@ -89,6 +89,8 @@ public sealed class DownloadAddOwnerTests : IDisposable
     public async Task AcceptedDuplicateConfirmationDeletesPersistedRecordBeforeAllowingTask()
     {
         using var context = DuplicatePolicyContext.WithCompleted(AppDialogOutcome.Accepted);
+        Assert.NotNull(context.Store.History);
+        var historyId = context.Store.History.Id;
 
         var shouldSkip = await context.Policy.ShouldSkipAsync(
             CreatePage(),
@@ -98,8 +100,11 @@ public sealed class DownloadAddOwnerTests : IDisposable
 
         Assert.False(shouldSkip);
         Assert.Empty(context.ListState.Downloaded);
-        Assert.Equal(1, context.Store.UpdateCount);
-        Assert.Equal(DownloadPhase.Deleted, context.Store.Current?.Phase);
+        Assert.Null(context.Store.Current);
+        Assert.Null(context.Store.History);
+        Assert.Equal(0, context.Store.UpdateCount);
+        Assert.Equal(1, context.Store.DeleteHistoryCount);
+        Assert.Equal(historyId, context.Store.DeletedHistoryId);
         Assert.Equal(1, context.Dialogs.ShowCount);
     }
 
@@ -295,11 +300,16 @@ public sealed class DownloadAddOwnerTests : IDisposable
 
         public DuplicatePolicyContext(
             AppDialogOutcome outcome,
-            DownloadTask? current = null)
+            DownloadTask? current = null,
+            DownloadHistoryRecord? history = null)
         {
-            Store = new MutableDownloadTaskStore(current);
-            _taskService = new DownloadTaskApplicationService(Store, new SystemClock());
-            _projectionStore = new DownloadTaskProjectionStore(_taskService, new SystemClock());
+            Store = new MutableDownloadTaskStore(current, history);
+            var historyService = DownloadHistoryService.CreateForSharedStore(Store);
+            _taskService = new DownloadTaskApplicationService(Store, historyService, new SystemClock());
+            _projectionStore = new DownloadTaskProjectionStore(
+                _taskService,
+                historyService,
+                new SystemClock());
             ListState = new DownloadListState();
             Notifications = new RecordingNotificationService();
             Dialogs = new StubDialogService(outcome);
@@ -331,8 +341,10 @@ public sealed class DownloadAddOwnerTests : IDisposable
                 new DownloadCompletion(2, "finished", null),
                 DateTimeOffset.UnixEpoch.AddSeconds(2))
                 .TryGetValue(out var completed));
-            var context = new DuplicatePolicyContext(outcome, completed);
-            context.ListState.AddDownloaded(DownloadTaskProjectionMapper.ToDownloadedItem(completed));
+            var history = DownloadHistoryRecord.FromCompletedTask(completed);
+            var context = new DuplicatePolicyContext(outcome, history: history);
+            context.ListState.AddDownloaded(DownloadTaskProjectionMapper.ToDownloadedItem(
+                history));
             return context;
         }
 
@@ -372,11 +384,22 @@ public sealed class DownloadAddOwnerTests : IDisposable
         }
     }
 
-    private sealed class MutableDownloadTaskStore(DownloadTask? current) : IDownloadTaskStore
+    private sealed class MutableDownloadTaskStore(
+        DownloadTask? current,
+        DownloadHistoryRecord? history) :
+        IDownloadTaskStore,
+        IDownloadHistoryStore,
+        IDownloadCompletionStore
     {
         public DownloadTask? Current { get; private set; } = current;
 
+        public DownloadHistoryRecord? History { get; private set; } = history;
+
         public int UpdateCount { get; private set; }
+
+        public int DeleteHistoryCount { get; private set; }
+
+        public DownloadTaskId? DeletedHistoryId { get; private set; }
 
         public Task<OperationResult> AddAsync(
             DownloadTask task,
@@ -387,8 +410,21 @@ public sealed class DownloadAddOwnerTests : IDisposable
             return Task.FromResult(OperationResult.Success());
         }
 
-        public Task<OperationResult> ClearHistoryAsync(CancellationToken cancellationToken) =>
-            Task.FromResult(OperationResult.Success());
+        public Task<OperationResult> AddHistoryAsync(
+            DownloadHistoryRecord history,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            History = history;
+            return Task.FromResult(OperationResult.Success());
+        }
+
+        public Task<OperationResult> ClearHistoryAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            History = null;
+            return Task.FromResult(OperationResult.Success());
+        }
 
         public Task<OperationResult> DeleteAsync(
             DownloadTaskId taskId,
@@ -411,8 +447,14 @@ public sealed class DownloadAddOwnerTests : IDisposable
         public Task<DownloadHistoryPage> GetHistoryPageAsync(
             DownloadHistoryCursor? cursor,
             int pageSize,
-            CancellationToken cancellationToken) =>
-            Task.FromResult(new DownloadHistoryPage(Array.Empty<DownloadTask>(), null));
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            IReadOnlyList<DownloadHistoryRecord> items = History == null
+                ? []
+                : [History];
+            return Task.FromResult(new DownloadHistoryPage(items, null));
+        }
 
         public Task<IReadOnlyList<QuarantinedDownloadRecord>> GetQuarantinedRecordsAsync(
             CancellationToken cancellationToken) =>
@@ -445,6 +487,33 @@ public sealed class DownloadAddOwnerTests : IDisposable
 
             Current = task;
             UpdateCount++;
+            return Task.FromResult(OperationResult.Success());
+        }
+
+        public Task<OperationResult> CompleteAsync(
+            DownloadTask task,
+            DownloadHistoryRecord history,
+            long expectedVersion,
+            CancellationToken cancellationToken)
+        {
+            Current = null;
+            History = history;
+            UpdateCount++;
+            return Task.FromResult(OperationResult.Success());
+        }
+
+        public Task<OperationResult> DeleteHistoryAsync(
+            DownloadTaskId taskId,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            DeletedHistoryId = taskId;
+            DeleteHistoryCount++;
+            if (History?.Id == taskId)
+            {
+                History = null;
+            }
+
             return Task.FromResult(OperationResult.Success());
         }
 

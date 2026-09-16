@@ -8,6 +8,7 @@ using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using DownKyi.Application.Diagnostics;
+using DownKyi.Application.Downloads;
 using DownKyi.Application.Time;
 using DownKyi.Core.BiliApi.BiliUtils;
 using DownKyi.Core.BiliApi.Login;
@@ -337,7 +338,7 @@ internal sealed class LegacyUpgradeCoordinator : ILegacyUpgradeCoordinator
         IProgress<LegacyUpgradeProgress> progress,
         CancellationToken cancellationToken)
     {
-        var batch = new List<DownloadTask>(Math.Min(BatchSize, records.Count));
+        var batch = new List<DownloadHistoryRecord>(Math.Min(BatchSize, records.Count));
         var visited = 0;
         foreach (var item in records.Values)
         {
@@ -348,7 +349,8 @@ internal sealed class LegacyUpgradeCoordinator : ILegacyUpgradeCoordinator
                 var downloaded = ConvertDownload(item);
                 if (downloaded != null)
                 {
-                    batch.Add(LegacyDownloadHistoryTaskFactory.Create(downloaded, _clock.UtcNow));
+                    batch.Add(DownloadHistoryRecord.FromCompletedTask(
+                        LegacyDownloadHistoryTaskFactory.Create(downloaded, _clock.UtcNow)));
                 }
             }
             catch (Exception e) when (IsLegacyRecordException(e) || e is SqliteException)
@@ -376,13 +378,13 @@ internal sealed class LegacyUpgradeCoordinator : ILegacyUpgradeCoordinator
     }
 
     private async Task PersistBatchAsync(
-        IEnumerable<DownloadTask> batch,
+        IEnumerable<DownloadHistoryRecord> batch,
         CancellationToken cancellationToken)
     {
-        foreach (var task in batch)
+        foreach (var history in batch)
         {
             await _projectionStore
-                .AddMigratedCompletedAsync(task, cancellationToken)
+                .AddMigratedHistoryAsync(history, cancellationToken)
                 .ConfigureAwait(false);
         }
     }

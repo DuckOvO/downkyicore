@@ -572,8 +572,12 @@ public sealed class DownloadPipelineStageTests
             var store = new SqliteDownloadTaskStore(
                 new SqliteDownloadTaskStoreOptions(databasePath),
                 new SystemClock());
-            var tasks = new DownloadTaskApplicationService(store, new SystemClock());
-            var projections = new DownloadTaskProjectionStore(tasks, new SystemClock());
+            var historyService = DownloadHistoryService.CreateForSharedStore(store);
+            var tasks = new DownloadTaskApplicationService(store, historyService, new SystemClock());
+            var projections = new DownloadTaskProjectionStore(
+                tasks,
+                historyService,
+                new SystemClock());
             var settings = new TestSettingsStore();
             var stateWriter = new DownloadTaskStateWriter(tasks);
             var taskId = new DownloadTaskId($"media-stage-{Guid.NewGuid():N}");

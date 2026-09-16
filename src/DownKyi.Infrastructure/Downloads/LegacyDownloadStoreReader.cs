@@ -39,8 +39,7 @@ internal static class LegacyDownloadStoreReader
         if (hasReservationKey)
         {
             command.CommandText = """
-                SELECT db.id, db.file_path, dl.download_status, db.output_reservation_key,
-                       EXISTS (SELECT 1 FROM downloaded d WHERE d.id = db.id)
+                SELECT db.id, db.file_path, dl.download_status, db.output_reservation_key
                 FROM download_base db
                 INNER JOIN downloading dl ON dl.id = db.id
                 ORDER BY db.id
@@ -49,8 +48,7 @@ internal static class LegacyDownloadStoreReader
         else
         {
             command.CommandText = """
-                SELECT db.id, db.file_path, dl.download_status, NULL,
-                       EXISTS (SELECT 1 FROM downloaded d WHERE d.id = db.id)
+                SELECT db.id, db.file_path, dl.download_status, NULL
                 FROM download_base db
                 INNER JOIN downloading dl ON dl.id = db.id
                 ORDER BY db.id
@@ -66,8 +64,7 @@ internal static class LegacyDownloadStoreReader
                 reader.GetString(1),
                 reader.GetInt32(2),
                 await reader.IsDBNullAsync(3, cancellationToken).ConfigureAwait(false)
-                    ? null : reader.GetString(3),
-                reader.GetInt32(4) != 0));
+                    ? null : reader.GetString(3)));
         }
 
         return rows;

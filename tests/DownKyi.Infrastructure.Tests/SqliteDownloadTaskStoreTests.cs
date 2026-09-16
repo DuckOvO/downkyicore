@@ -24,11 +24,21 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
         using var connection = await OpenReadOnlyConnectionAsync().ConfigureAwait(true);
         using var version = connection.CreateCommand();
         version.CommandText = "PRAGMA user_version";
-        Assert.Equal(8L, await version.ExecuteScalarAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(9L, await version.ExecuteScalarAsync(TestContext.Current.CancellationToken));
+        Assert.True(await TableExistsAsync("download_history"));
+        Assert.False(await TableExistsAsync("downloaded"));
+        Assert.Equal(
+            [
+                "id", "cid", "zone_id", "order", "main_title", "name", "duration",
+                "video_codec_name", "resolution", "audio_codec", "file_size",
+                "published_artifacts", "finished_timestamp", "finished_time", "max_speed_display"
+            ],
+            await ReadTableColumnsAsync("download_history"));
         Assert.True(await TableExistsAsync("download_upgrade_admission_gate"));
         Assert.Equal(0, await CountSchemaMigrationAsync(4));
         Assert.Equal(0, await CountSchemaMigrationAsync(5));
-        Assert.Equal(1, await CountSchemaMigrationAsync(8));
+        Assert.Equal(0, await CountSchemaMigrationAsync(8));
+        Assert.Equal(1, await CountSchemaMigrationAsync(9));
         Assert.False(await store.IsLegacyUpgradeAdmissionBlockedAsync(
             TestContext.Current.CancellationToken));
     }
@@ -54,8 +64,8 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
         using var store = CreateStore();
         await store.InitializeAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(8, await ReadSchemaVersionAsync());
-        Assert.Equal(1, await CountSchemaMigrationAsync(8));
+        Assert.Equal(9, await ReadSchemaVersionAsync());
+        Assert.Equal(1, await CountSchemaMigrationAsync(9));
         Assert.Single(Directory.GetFiles(
             Path.Combine(_directory, "Backup"),
             "download.db.schema-v0-*.bak"));
@@ -106,11 +116,123 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
         Assert.Equal($"legacy-v{version}", restored.Id.Value);
         Assert.Equal(DownloadPhase.Paused, restored.Phase);
         Assert.Equal("aria-gid", restored.Transfer.BackendIdentity);
-        Assert.Equal(8, await ReadSchemaVersionAsync());
-        Assert.Equal(1, await CountSchemaMigrationAsync(8));
+        Assert.Equal(9, await ReadSchemaVersionAsync());
+        Assert.Equal(1, await CountSchemaMigrationAsync(9));
         Assert.Single(Directory.GetFiles(
             Path.Combine(_directory, "Backup"),
             $"download.db.schema-v{version}-*.bak"));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task LegacyMigrationKeepsCollisionQuarantineWithItsOwner(
+        bool quarantineActive,
+        bool quarantineHistory)
+    {
+        var active = CreatePausedTask(
+            "legacy-active-history-collision",
+            Path.Combine(_directory, "collision", "video"));
+        await CreateVersionThreeDatabaseAsync(active);
+        await InsertLegacyDownloadedRowAsync(active.Id.Value);
+        if (quarantineActive)
+        {
+            await InsertLegacyQuarantineAsync("downloading", active.Id.Value);
+        }
+
+        if (quarantineHistory)
+        {
+            await InsertLegacyQuarantineAsync("downloaded", active.Id.Value);
+        }
+
+        var before = await ReadStoredStateAsync(active.Id.Value);
+
+        using (var first = CreateStore())
+        {
+            await first.InitializeAsync(TestContext.Current.CancellationToken);
+
+            var unfinished = await first.GetUnfinishedAsync(TestContext.Current.CancellationToken);
+            if (quarantineActive)
+            {
+                Assert.Empty(unfinished);
+            }
+            else
+            {
+                var restored = Assert.Single(unfinished);
+                Assert.Equal(active.Id, restored.Id);
+                Assert.Equal(DownloadPhase.Paused, restored.Phase);
+            }
+
+            Assert.Empty((await first.GetHistoryPageAsync(
+                null,
+                10,
+                TestContext.Current.CancellationToken)).Items);
+            var quarantine = await first.GetQuarantinedRecordsAsync(
+                TestContext.Current.CancellationToken);
+            if (quarantineActive)
+            {
+                var activeQuarantine = Assert.Single(quarantine);
+                Assert.Equal("downloading", activeQuarantine.SourceTable);
+                Assert.Equal(active.Id.Value, activeQuarantine.RecordId);
+                Assert.Equal("legacy-downloading-corrupt-record", activeQuarantine.Reason);
+            }
+            else
+            {
+                Assert.Empty(quarantine);
+            }
+        }
+
+        Assert.Equal(before, await ReadStoredStateAsync(active.Id.Value));
+        Assert.Equal(1, await CountDownloadBaseRecordAsync(active.Id.Value));
+        Assert.Equal(1, await CountDownloadingRecordAsync(active.Id.Value));
+        Assert.False(await TableExistsAsync("downloaded"));
+        Assert.Equal(9, await ReadSchemaVersionAsync());
+
+        using var reopened = CreateStore();
+        await reopened.InitializeAsync(TestContext.Current.CancellationToken);
+        var reopenedUnfinished = await reopened.GetUnfinishedAsync(
+            TestContext.Current.CancellationToken);
+        if (quarantineActive)
+        {
+            Assert.Empty(reopenedUnfinished);
+        }
+        else
+        {
+            Assert.Equal(active.Id, Assert.Single(reopenedUnfinished).Id);
+        }
+
+        Assert.Empty((await reopened.GetHistoryPageAsync(
+            null,
+            10,
+            TestContext.Current.CancellationToken)).Items);
+    }
+
+    [Fact]
+    public async Task LegacyHistoryQuarantineFollowsExplicitHistoryProjection()
+    {
+        var completed = CreateCompletedTask(
+            "legacy-history-quarantine",
+            123,
+            Path.Combine(_directory, "history-quarantine", "video"));
+        await CreateVersionThreeDatabaseAsync(completed);
+        await InsertLegacyQuarantineAsync("downloaded", completed.Id.Value);
+        using var store = CreateStore();
+
+        await store.InitializeAsync(TestContext.Current.CancellationToken);
+
+        Assert.Empty((await store.GetHistoryPageAsync(
+            null,
+            10,
+            TestContext.Current.CancellationToken)).Items);
+        var quarantine = Assert.Single(
+            await store.GetQuarantinedRecordsAsync(TestContext.Current.CancellationToken));
+        Assert.Equal("download_history", quarantine.SourceTable);
+        Assert.Equal(completed.Id.Value, quarantine.RecordId);
+        Assert.Equal("legacy-downloaded-corrupt-record", quarantine.Reason);
+        Assert.Equal(0, await CountDownloadBaseRecordAsync(completed.Id.Value));
+        Assert.False(await TableExistsAsync("downloaded"));
     }
 
     [Fact]
@@ -258,7 +380,6 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
             Path.Combine(_directory, "quarantined", "video"));
         await CreateVersionThreeDatabaseAsync(completed, quarantined);
         await InsertPreexistingQuarantineAsync("already-quarantined");
-        var completedBefore = await ReadStoredStateAsync("completed");
         var quarantinedBefore = await ReadStoredStateAsync("already-quarantined");
         var resolvedPaths = new List<string>();
         using var store = CreateStore(new StubPhysicalOutputPathResolver(path =>
@@ -283,7 +404,10 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
         Assert.Equal("preexisting-corrupt-record", quarantine.Reason);
         Assert.True(await store.IsLegacyUpgradeAdmissionBlockedAsync(
             TestContext.Current.CancellationToken));
-        Assert.Equal(completedBefore, await ReadStoredStateAsync("completed"));
+        Assert.Equal(completed.Metadata.Name, Assert.Single((await store.GetHistoryPageAsync(
+            null,
+            10,
+            TestContext.Current.CancellationToken)).Items).Name);
         Assert.Equal(quarantinedBefore, await ReadStoredStateAsync("already-quarantined"));
     }
 
@@ -321,7 +445,7 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
             Assert.Single(await reopened.GetUnfinishedAsync(TestContext.Current.CancellationToken)).Id.Value);
         Assert.True(await reopened.IsLegacyUpgradeAdmissionBlockedAsync(
             TestContext.Current.CancellationToken));
-        Assert.Equal(1, await CountSchemaMigrationAsync(8));
+        Assert.Equal(1, await CountSchemaMigrationAsync(9));
     }
 
     [Fact]
@@ -452,12 +576,10 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
         }
 
         await InsertOrphanedLegacyDownloadingRecordAsync();
-        using (var reopened = CreateStore())
-        {
-            await reopened.InitializeAsync(TestContext.Current.CancellationToken);
-        }
+        using var reopened = CreateStore();
+        await reopened.InitializeAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(8, await ReadSchemaVersionAsync());
+        Assert.Equal(9, await ReadSchemaVersionAsync());
         Assert.Equal(0, await CountDownloadingRecordAsync("orphaned-download"));
     }
 
@@ -470,7 +592,7 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
 
         await store.InitializeAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(8, await ReadSchemaVersionAsync());
+        Assert.Equal(9, await ReadSchemaVersionAsync());
         Assert.Equal(1, await CountDownloadBaseRecordAsync("legacy-resume"));
         Assert.Equal(1, await CountDownloadingRecordAsync("legacy-resume"));
         Assert.Equal(0, await CountDownloadingRecordAsync("orphaned-download"));
@@ -481,8 +603,9 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
     {
         using (var store = CreateStore())
         {
-            Assert.True((await store.AddAsync(
-                CreateCompletedTask("history-preserved", 123),
+            Assert.True((await store.AddHistoryAsync(
+                DownloadHistoryRecord.FromCompletedTask(
+                    CreateCompletedTask("history-preserved", 123)),
                 TestContext.Current.CancellationToken)).IsSuccess);
         }
 
@@ -491,8 +614,8 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
         var history = await reopened.GetHistoryPageAsync(null, 10, TestContext.Current.CancellationToken);
 
         Assert.Equal("history-preserved", Assert.Single(history.Items).Id.Value);
-        Assert.Equal(1, await CountDownloadBaseRecordAsync("history-preserved"));
-        Assert.Equal(1, await CountDownloadedRecordAsync("history-preserved"));
+        Assert.Equal(0, await CountDownloadBaseRecordAsync("history-preserved"));
+        Assert.Equal(1, await CountHistoryRecordAsync("history-preserved"));
         Assert.Equal(0, await CountDownloadingRecordAsync("orphaned-download"));
     }
 
@@ -521,7 +644,7 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task CompletedPublishedArtifactMapSurvivesDatabaseReopen()
+    public async Task CompletedHistoryRecordRoundTripsEveryFieldAcrossDatabaseReopen()
     {
         var media = Path.Combine(_directory, "published.flv");
         var subtitle = Path.Combine(_directory, "published.zh-Hant.srt");
@@ -529,7 +652,7 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
             new DownloadTaskId("published-reopen"),
             CreateMetadata("published-reopen"),
             CreatePlan(),
-            new DownloadOutput(Path.Combine(_directory, "base-without-matching-suffix"), null),
+            new DownloadOutput(Path.Combine(_directory, "base-without-matching-suffix"), "1.25 GiB"),
             _clock.UtcNow);
         task = task.Start(_clock.UtcNow.AddSeconds(1)).RequireValue();
         var mediaPublishing = new DownloadPublishingArtifact(
@@ -544,23 +667,90 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
             _clock.UtcNow.AddSeconds(4)).RequireValue();
         task = task.RecordPublishedArtifact(subtitlePublishing, subtitle,
             _clock.UtcNow.AddSeconds(5)).RequireValue();
-        task = task.Complete(
-            new DownloadCompletion(123, "finished", null),
+        var active = task;
+        var completed = task.Complete(
+            new DownloadCompletion(123, "finished", "24 Mbps"),
             _clock.UtcNow.AddSeconds(6)).RequireValue();
+        var expected = DownloadHistoryRecord.FromCompletedTask(completed);
         using (var store = CreateStore())
         {
-            Assert.True((await store.AddAsync(task, TestContext.Current.CancellationToken)).IsSuccess);
+            Assert.True((await store.AddAsync(
+                active,
+                TestContext.Current.CancellationToken)).IsSuccess);
+            Assert.True((await store.CompleteAsync(
+                completed,
+                expected,
+                active.Version,
+                TestContext.Current.CancellationToken)).IsSuccess);
         }
 
         using var reopened = CreateStore();
         var restored = Assert.Single((await reopened.GetHistoryPageAsync(
             null, 10, TestContext.Current.CancellationToken)).Items);
 
-        Assert.Equal(DownloadPhase.Completed, restored.Phase);
-        Assert.Equal(media, restored.Output.PublishedArtifacts["media"]);
-        Assert.Equal(subtitle, restored.Output.PublishedArtifacts["subtitle:zh-Hant"]);
-        Assert.Equal(task.Output.BasePath, restored.Output.BasePath);
-        Assert.Equal(task.Output.StagingToken, restored.Output.StagingToken);
+        Assert.Equivalent(expected, restored, strict: true);
+        Assert.Null(await reopened.FindAsync(completed.Id, TestContext.Current.CancellationToken));
+        Assert.Equal(0, await CountDownloadBaseRecordAsync(completed.Id.Value));
+        Assert.Equal(1, await CountHistoryRecordAsync(completed.Id.Value));
+    }
+
+    [Fact]
+    public async Task HistoryConflictRollsBackCompletedTransitionAndKeepsRecoverableTask()
+    {
+        var active = CreateQueuedTask("completion-conflict", Path.Combine(_directory, "conflict"));
+        active = active.Start(_clock.UtcNow.AddSeconds(1)).RequireValue();
+        var completed = active.Complete(
+            new DownloadCompletion(123, "finished", null),
+            _clock.UtcNow.AddSeconds(2)).RequireValue();
+        var history = DownloadHistoryRecord.FromCompletedTask(completed);
+        using var store = CreateStore();
+        Assert.True((await store.AddAsync(
+            active,
+            TestContext.Current.CancellationToken)).IsSuccess);
+        await InsertHistoryBypassingOwnershipCheckAsync(history);
+
+        var result = await store.CompleteAsync(
+            completed,
+            history,
+            active.Version,
+            TestContext.Current.CancellationToken);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("download.store.conflict", result.Error?.Code);
+        var restored = await store.FindAsync(active.Id, TestContext.Current.CancellationToken);
+        Assert.NotNull(restored);
+        Assert.Equal(active.Version, restored.Version);
+        Assert.Equal(active.Phase, restored.Phase);
+        Assert.Equal(1, await CountDownloadBaseRecordAsync(active.Id.Value));
+        Assert.Equal(1, await CountHistoryRecordAsync(active.Id.Value));
+    }
+
+    [Fact]
+    public async Task HistoryInsertFailureRollsBackCompletedTransitionAndKeepsRecoverableTask()
+    {
+        var active = CreateQueuedTask("completion-write-failure", Path.Combine(_directory, "failure"));
+        active = active.Start(_clock.UtcNow.AddSeconds(1)).RequireValue();
+        var completed = active.Complete(
+            new DownloadCompletion(123, "finished", null),
+            _clock.UtcNow.AddSeconds(2)).RequireValue();
+        using var store = CreateStore();
+        Assert.True((await store.AddAsync(
+            active,
+            TestContext.Current.CancellationToken)).IsSuccess);
+        await CreateHistoryInsertFailureTriggerAsync();
+
+        await Assert.ThrowsAsync<SqliteException>(() => store.CompleteAsync(
+            completed,
+            DownloadHistoryRecord.FromCompletedTask(completed),
+            active.Version,
+            TestContext.Current.CancellationToken));
+
+        var restored = await store.FindAsync(active.Id, TestContext.Current.CancellationToken);
+        Assert.NotNull(restored);
+        Assert.Equal(active.Version, restored.Version);
+        Assert.Equal(active.Phase, restored.Phase);
+        Assert.Equal(1, await CountDownloadBaseRecordAsync(active.Id.Value));
+        Assert.Equal(0, await CountHistoryRecordAsync(active.Id.Value));
     }
 
     [Fact]
@@ -621,8 +811,8 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
         await reopened.InitializeAsync(TestContext.Current.CancellationToken);
         var restored = Assert.Single(
             await reopened.GetUnfinishedAsync(TestContext.Current.CancellationToken));
-        Assert.Equal(8, await ReadSchemaVersionAsync());
-        Assert.Equal(1, await CountSchemaMigrationAsync(8));
+        Assert.Equal(9, await ReadSchemaVersionAsync());
+        Assert.Equal(1, await CountSchemaMigrationAsync(9));
         Assert.Equal(expected.Output.StagingToken, restored.Output.StagingToken);
         Assert.Null(restored.Output.PublishingArtifact);
     }
@@ -639,8 +829,8 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
 
         Assert.Null(restored.Plan.NfoRequest);
         Assert.Equal(DownloadContentSelection.None, restored.Plan.RequestedContent);
-        Assert.Equal(8, await ReadSchemaVersionAsync());
-        Assert.Equal(1, await CountSchemaMigrationAsync(8));
+        Assert.Equal(9, await ReadSchemaVersionAsync());
+        Assert.Equal(1, await CountSchemaMigrationAsync(9));
     }
 
     [Fact]
@@ -813,10 +1003,13 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
         var paused = CreatePausedTask("paused-snapshot");
         var completed = CreateCompletedTask("completed-snapshot", 10);
         var quarantined = CreateQueuedTask("quarantined-snapshot", Path.Combine(_directory, "quarantined"));
-        foreach (var task in new[] { failed, paused, completed, quarantined })
+        foreach (var task in new[] { failed, paused, quarantined })
         {
             Assert.True((await store.AddAsync(task, TestContext.Current.CancellationToken)).IsSuccess);
         }
+        Assert.True((await store.AddHistoryAsync(
+            DownloadHistoryRecord.FromCompletedTask(completed),
+            TestContext.Current.CancellationToken)).IsSuccess);
 
         await InsertPreexistingQuarantineAsync(quarantined.Id.Value);
         var keys = await store.GetActiveOutputReservationKeysAsync(
@@ -905,8 +1098,9 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
         Assert.True((await store.AddAsync(
             CreateQueuedTask("legacy-equivalence", legacy),
             TestContext.Current.CancellationToken)).IsSuccess);
-        Assert.True((await store.AddAsync(
-            CreateCompletedTask("completed-equivalence", 10, completed),
+        Assert.True((await store.AddHistoryAsync(
+            DownloadHistoryRecord.FromCompletedTask(
+                CreateCompletedTask("completed-equivalence", 10, completed)),
             TestContext.Current.CancellationToken)).IsSuccess);
         Assert.True((await store.AddAsync(
             CreateQueuedTask("quarantined-equivalence", quarantined),
@@ -1034,30 +1228,38 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
                 TestContext.Current.CancellationToken)).IsSuccess);
             Assert.True((await first.AddAsync(CreatePausedTask("rekey-legacy", legacy),
                 TestContext.Current.CancellationToken)).IsSuccess);
-            Assert.True((await first.AddAsync(CreateCompletedTask("rekey-history", 123),
+            Assert.True((await first.AddHistoryAsync(DownloadHistoryRecord.FromCompletedTask(
+                    CreateCompletedTask("rekey-history", 123)),
                 TestContext.Current.CancellationToken)).IsSuccess);
         }
 
         var originalBefore = await ReadStoredStateAsync("rekey-original");
         var legacyBefore = await ReadStoredStateAsync("rekey-legacy");
-        var historyBefore = await ReadStoredStateAsync("rekey-history");
+        DownloadHistoryRecord historyBefore;
+        using (var historyReader = CreateStore())
+        {
+            historyBefore = Assert.Single((await historyReader.GetHistoryPageAsync(
+                null, 10, TestContext.Current.CancellationToken)).Items);
+        }
         var publicationBefore = await ReadPublicationPayloadAsync("rekey-original");
         await SetReservationKeyAsync("rekey-original",
             DownloadOutputPathKey.Create(original, !ignoreCase));
         await SetReservationKeyAsync("rekey-legacy", null);
+        DownloadHistoryRecord historyAfter;
         using (var reopened = CreateStore())
         {
             await reopened.InitializeAsync(TestContext.Current.CancellationToken);
+            historyAfter = Assert.Single((await reopened.GetHistoryPageAsync(
+                null, 10, TestContext.Current.CancellationToken)).Items);
         }
 
         Assert.Equal(DownloadOutputPathKey.Create(original, ignoreCase),
             await ReadReservationKeyAsync("rekey-original"));
         Assert.Equal(DownloadOutputPathKey.Create(legacy, ignoreCase),
             await ReadReservationKeyAsync("rekey-legacy"));
-        Assert.Null(await ReadReservationKeyAsync("rekey-history"));
         Assert.Equal(originalBefore, await ReadStoredStateAsync("rekey-original"));
         Assert.Equal(legacyBefore, await ReadStoredStateAsync("rekey-legacy"));
-        Assert.Equal(historyBefore, await ReadStoredStateAsync("rekey-history"));
+        Assert.Equivalent(historyBefore, historyAfter, strict: true);
         Assert.Equal(publicationBefore, await ReadPublicationPayloadAsync("rekey-original"));
         using (var repeated = CreateStore())
         {
@@ -1112,7 +1314,7 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task ReservationRekeyPreflightsQuarantineAndCompletedUniqueOccupants()
+    public async Task ReservationRekeyPreflightsQuarantinedUniqueOccupants()
     {
         var target = Path.Combine(_directory, "reserved-target");
         using (var first = CreateStore())
@@ -1132,29 +1334,6 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
                 reopened.InitializeAsync(TestContext.Current.CancellationToken));
         }
 
-        // A completed row is not an active reservation, but a non-NULL key
-        // still occupies the actual SQLite UNIQUE index.
-        await SetPathAndReservationKeyAsync("moving", Path.Combine(_directory, "old"),
-            DownloadOutputPathKey.Create(Path.Combine(_directory, "old"),
-                DownloadOutputPathKey.UsesCaseInsensitiveComparison));
-        var safeQuarantinePath = Path.Combine(_directory, "quarantine-safe");
-        await SetPathAndReservationKeyAsync("occupied-quarantine", safeQuarantinePath,
-            DownloadOutputPathKey.Create(safeQuarantinePath,
-                DownloadOutputPathKey.UsesCaseInsensitiveComparison));
-        using (var store = CreateStore())
-        {
-            Assert.True((await store.AddAsync(CreateCompletedTask("occupied-history", 123),
-                TestContext.Current.CancellationToken)).IsSuccess);
-        }
-        await SetReservationKeyAsync("occupied-history",
-            DownloadOutputPathKey.Create(target,
-                DownloadOutputPathKey.UsesCaseInsensitiveComparison));
-        await SetPathAndReservationKeyAsync("moving", target,
-            DownloadOutputPathKey.Create(Path.Combine(_directory, "old"),
-                DownloadOutputPathKey.UsesCaseInsensitiveComparison));
-        using var completedCollision = CreateStore();
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            completedCollision.InitializeAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -1509,8 +1688,8 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
             ("history-c", 200L)
         })
         {
-            Assert.True((await store.AddAsync(
-                CreateCompletedTask(id, timestamp),
+            Assert.True((await store.AddHistoryAsync(
+                DownloadHistoryRecord.FromCompletedTask(CreateCompletedTask(id, timestamp)),
                 TestContext.Current.CancellationToken)).IsSuccess);
         }
 
@@ -1523,6 +1702,42 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
         Assert.Equal(["history-b", "history-c"], first.Items.Select(task => task.Id.Value));
         Assert.Equal("history-a", Assert.Single(second.Items).Id.Value);
         Assert.Null(second.NextCursor);
+    }
+
+    [Fact]
+    public async Task CorruptHistoryDoesNotTruncateLaterKeysetPages()
+    {
+        using var store = CreateStore();
+        foreach (var (id, timestamp) in new[]
+        {
+            ("history-a", 400L),
+            ("history-b", 300L),
+            ("history-corrupt", 200L),
+            ("history-c", 100L)
+        })
+        {
+            Assert.True((await store.AddHistoryAsync(
+                DownloadHistoryRecord.FromCompletedTask(CreateCompletedTask(id, timestamp)),
+                TestContext.Current.CancellationToken)).IsSuccess);
+        }
+
+        await CorruptHistoryPublishedArtifactsAsync("history-corrupt");
+
+        var first = await store.GetHistoryPageAsync(null, 2, TestContext.Current.CancellationToken);
+        Assert.NotNull(first.NextCursor);
+        var second = await store.GetHistoryPageAsync(
+            first.NextCursor,
+            2,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(["history-a", "history-b"], first.Items.Select(item => item.Id.Value));
+        Assert.Equal("history-c", Assert.Single(second.Items).Id.Value);
+        Assert.Null(second.NextCursor);
+        var quarantine = Assert.Single(
+            await store.GetQuarantinedRecordsAsync(TestContext.Current.CancellationToken));
+        Assert.Equal("download_history", quarantine.SourceTable);
+        Assert.Equal("history-corrupt", quarantine.RecordId);
+        Assert.Equal("published_artifacts", quarantine.FieldName);
     }
 
     [Fact]
@@ -1726,13 +1941,27 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
         return (long)(await command.ExecuteScalarAsync(TestContext.Current.CancellationToken).ConfigureAwait(false))!;
     }
 
-    private async Task<long> CountDownloadedRecordAsync(string id)
+    private async Task<long> CountHistoryRecordAsync(string id)
     {
         using var connection = await OpenReadOnlyConnectionAsync().ConfigureAwait(false);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT COUNT(*) FROM downloaded WHERE id = @id";
+        command.CommandText = "SELECT COUNT(*) FROM download_history WHERE id = @id";
         command.Parameters.AddWithValue("@id", id);
         return (long)(await command.ExecuteScalarAsync(TestContext.Current.CancellationToken).ConfigureAwait(false))!;
+    }
+
+    private async Task InsertHistoryBypassingOwnershipCheckAsync(DownloadHistoryRecord history)
+    {
+        using var connection = await OpenConnectionAsync(readOnly: false).ConfigureAwait(false);
+        using var transaction = (SqliteTransaction)await connection
+            .BeginTransactionAsync(TestContext.Current.CancellationToken)
+            .ConfigureAwait(false);
+        await DownloadHistorySqlWriter.InsertAsync(
+            connection,
+            transaction,
+            history,
+            TestContext.Current.CancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
     }
 
     private async Task<long> ReadSchemaVersionAsync()
@@ -1748,7 +1977,7 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
         using (var store = CreateStore())
         {
             await store.InitializeAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
-            foreach (var task in tasks)
+            foreach (var task in tasks.Where(task => task.Phase != DownloadPhase.Completed))
             {
                 Assert.True((await store.AddAsync(
                     task,
@@ -1756,7 +1985,9 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
             }
         }
 
-        await DowngradeCurrentDatabaseAsync(3).ConfigureAwait(false);
+        await DowngradeCurrentDatabaseAsync(
+            3,
+            tasks.Where(task => task.Phase == DownloadPhase.Completed)).ConfigureAwait(false);
     }
 
     private async Task InsertPreexistingQuarantineAsync(string id)
@@ -1850,10 +2081,9 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
         using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT db.file_path, dl.gid, dl.download_files, dl.downloaded_files,
-                   d.finished_timestamp
+                   NULL AS finished_timestamp
             FROM download_base db
             LEFT JOIN downloading dl ON dl.id = db.id
-            LEFT JOIN downloaded d ON d.id = db.id
             WHERE db.id = @id
             """;
         command.Parameters.AddWithValue("@id", id);
@@ -1888,6 +2118,23 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
         command.Parameters.AddWithValue("@name", tableName);
         return (long)(await command.ExecuteScalarAsync(TestContext.Current.CancellationToken)
             .ConfigureAwait(false))! != 0;
+    }
+
+    private async Task<IReadOnlyList<string>> ReadTableColumnsAsync(string tableName)
+    {
+        using var connection = await OpenReadOnlyConnectionAsync().ConfigureAwait(false);
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT name FROM pragma_table_info(@table_name) ORDER BY cid";
+        command.Parameters.AddWithValue("@table_name", tableName);
+        using var reader = await command.ExecuteReaderAsync(TestContext.Current.CancellationToken)
+            .ConfigureAwait(false);
+        var columns = new List<string>();
+        while (await reader.ReadAsync(TestContext.Current.CancellationToken).ConfigureAwait(false))
+        {
+            columns.Add(reader.GetString(0));
+        }
+
+        return columns;
     }
 
     private async Task<long> CountSchemaMigrationAsync(int version)
@@ -1951,7 +2198,9 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
         await DowngradeCurrentDatabaseAsync(version).ConfigureAwait(false);
     }
 
-    private async Task DowngradeCurrentDatabaseAsync(int version)
+    private async Task DowngradeCurrentDatabaseAsync(
+        int version,
+        IEnumerable<DownloadTask>? completedTasks = null)
     {
         using var connection = await OpenConnectionAsync(readOnly: false).ConfigureAwait(false);
         using var transaction = (SqliteTransaction)await connection
@@ -1959,6 +2208,22 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
             .ConfigureAwait(false);
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
+        command.CommandText = """
+            CREATE TABLE downloaded (
+                id TEXT PRIMARY KEY REFERENCES download_base(id) ON DELETE CASCADE,
+                max_speed_display TEXT,
+                finished_timestamp INTEGER NOT NULL DEFAULT 0,
+                finished_time TEXT NOT NULL DEFAULT ''
+            );
+            DROP TABLE download_history;
+            """;
+        await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
+
+        foreach (var task in completedTasks ?? [])
+        {
+            await InsertLegacyCompletedTaskAsync(connection, transaction, task).ConfigureAwait(false);
+        }
+
         command.CommandText = """
             ALTER TABLE download_base DROP COLUMN publishing_key;
             ALTER TABLE download_base DROP COLUMN publishing_file_name;
@@ -2035,6 +2300,84 @@ public sealed class SqliteDownloadTaskStoreTests : IDisposable
         SetLegacyUserVersionCommandText(command, version);
         await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
         await transaction.CommitAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task InsertLegacyCompletedTaskAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        DownloadTask task)
+    {
+        await DownloadTaskSqlWriter.InsertBaseAsync(
+            connection,
+            transaction,
+            task,
+            TestContext.Current.CancellationToken).ConfigureAwait(false);
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO downloaded
+                (id, max_speed_display, finished_timestamp, finished_time)
+            VALUES (@id, @max_speed_display, @finished_timestamp, @finished_time)
+            """;
+        command.Parameters.AddWithValue("@id", task.Id.Value);
+        command.Parameters.AddWithValue(
+            "@max_speed_display",
+            task.Completion!.MaximumSpeedText ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("@finished_timestamp", task.Completion.FinishedTimestamp);
+        command.Parameters.AddWithValue("@finished_time", task.Completion.FinishedTimeText);
+        await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task InsertLegacyQuarantineAsync(string sourceTable, string id)
+    {
+        using var connection = await OpenConnectionAsync(readOnly: false).ConfigureAwait(false);
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO download_quarantine
+                (source_table, record_id, field_name, reason, quarantined_at_utc)
+            VALUES (@source_table, @id, 'legacy-field', @reason, @now)
+            """;
+        command.Parameters.AddWithValue("@source_table", sourceTable);
+        command.Parameters.AddWithValue("@id", id);
+        command.Parameters.AddWithValue("@reason", $"legacy-{sourceTable}-corrupt-record");
+        command.Parameters.AddWithValue("@now", _clock.UtcNow.ToUnixTimeMilliseconds());
+        await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task InsertLegacyDownloadedRowAsync(string id)
+    {
+        using var connection = await OpenConnectionAsync(readOnly: false).ConfigureAwait(false);
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO downloaded
+                (id, max_speed_display, finished_timestamp, finished_time)
+            VALUES (@id, '1 MiB/s', 1, 'legacy-finished')
+            """;
+        command.Parameters.AddWithValue("@id", id);
+        await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task CreateHistoryInsertFailureTriggerAsync()
+    {
+        using var connection = await OpenConnectionAsync(readOnly: false).ConfigureAwait(false);
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            CREATE TRIGGER reject_history_insert
+            BEFORE INSERT ON download_history
+            BEGIN
+                INSERT INTO missing_history_sink(id) VALUES (NEW.id);
+            END;
+            """;
+        await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task CorruptHistoryPublishedArtifactsAsync(string id)
+    {
+        using var connection = await OpenConnectionAsync(readOnly: false).ConfigureAwait(false);
+        using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE download_history SET published_artifacts = '{' WHERE id = @id";
+        command.Parameters.AddWithValue("@id", id);
+        await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken).ConfigureAwait(false);
     }
 
     private static void SetLegacyUserVersionCommandText(SqliteCommand command, int version)

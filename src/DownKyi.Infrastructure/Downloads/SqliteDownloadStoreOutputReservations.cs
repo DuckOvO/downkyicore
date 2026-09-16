@@ -14,9 +14,11 @@ internal sealed class SqliteDownloadStoreOutputReservations(SqliteDownloadStoreD
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(task);
-        if (task.Phase == DownloadPhase.Deleted)
+        if (task.Phase is DownloadPhase.Completed or DownloadPhase.Deleted)
         {
-            throw new ArgumentException("A deleted task cannot be inserted.", nameof(task));
+            throw new ArgumentException(
+                "Only recoverable download tasks can be inserted as active tasks.",
+                nameof(task));
         }
 
         return _database.ExecuteImmediateTransactionAsync(
@@ -24,8 +26,23 @@ internal sealed class SqliteDownloadStoreOutputReservations(SqliteDownloadStoreD
             {
                 try
                 {
-                    if (task.Phase != DownloadPhase.Completed &&
-                        await IsOutputPathReservedCoreAsync(
+                    using (var history = connection.CreateCommand())
+                    {
+                        history.Transaction = transaction;
+                        history.CommandText =
+                            "SELECT EXISTS (SELECT 1 FROM download_history WHERE id = @id)";
+                        history.Parameters.AddWithValue("@id", task.Id.Value);
+                        if (Convert.ToInt64(
+                                await history.ExecuteScalarAsync(token).ConfigureAwait(false),
+                                System.Globalization.CultureInfo.InvariantCulture) != 0)
+                        {
+                            return DownloadStoreOperationResults.Conflict(
+                                task.Id,
+                                "already exists as history");
+                        }
+                    }
+
+                    if (await IsOutputPathReservedCoreAsync(
                             connection,
                             transaction,
                             task.Output.BasePath,

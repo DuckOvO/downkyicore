@@ -384,8 +384,12 @@ public sealed class VideoTagLoadingTests : IDisposable
             });
             Store = new RecordingDownloadTaskStore();
             var clock = new SystemClock();
-            _taskService = new DownloadTaskApplicationService(Store, clock);
-            _projectionStore = new DownloadTaskProjectionStore(_taskService, clock);
+            var historyService = DownloadHistoryService.CreateForSharedStore(Store);
+            _taskService = new DownloadTaskApplicationService(Store, historyService, clock);
+            _projectionStore = new DownloadTaskProjectionStore(
+                _taskService,
+                historyService,
+                clock);
             ListState = new DownloadListState();
             Queue = new RecordingDownloadTaskQueue();
             Logger = new RecordingLogger<DownloadMovieMetadataBuilder>();
@@ -552,7 +556,10 @@ public sealed class VideoTagLoadingTests : IDisposable
         }
     }
 
-    private sealed class RecordingDownloadTaskStore : IDownloadTaskStore
+    private sealed class RecordingDownloadTaskStore :
+        IDownloadTaskStore,
+        IDownloadHistoryStore,
+        IDownloadCompletionStore
     {
         public int AddCount { get; private set; }
 
@@ -572,10 +579,19 @@ public sealed class VideoTagLoadingTests : IDisposable
             return OperationResult.Success();
         }
 
+        public Task<OperationResult> AddHistoryAsync(
+            DownloadHistoryRecord history,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(OperationResult.Success());
+
         public Task<OperationResult> ClearHistoryAsync(CancellationToken cancellationToken) =>
             Task.FromResult(OperationResult.Success());
 
         public Task<OperationResult> DeleteAsync(
+            DownloadTaskId taskId,
+            CancellationToken cancellationToken) => Task.FromResult(OperationResult.Success());
+
+        public Task<OperationResult> DeleteHistoryAsync(
             DownloadTaskId taskId,
             CancellationToken cancellationToken) => Task.FromResult(OperationResult.Success());
 
@@ -592,7 +608,7 @@ public sealed class VideoTagLoadingTests : IDisposable
             DownloadHistoryCursor? cursor,
             int pageSize,
             CancellationToken cancellationToken) => Task.FromResult(
-                new DownloadHistoryPage(Array.Empty<DownloadTask>(), null));
+                new DownloadHistoryPage([], null));
 
         public Task<IReadOnlyList<QuarantinedDownloadRecord>> GetQuarantinedRecordsAsync(
             CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<QuarantinedDownloadRecord>>(
@@ -611,6 +627,12 @@ public sealed class VideoTagLoadingTests : IDisposable
 
         public Task<OperationResult> UpdateAsync(
             DownloadTask task,
+            long expectedVersion,
+            CancellationToken cancellationToken) => Task.FromResult(OperationResult.Success());
+
+        public Task<OperationResult> CompleteAsync(
+            DownloadTask task,
+            DownloadHistoryRecord history,
             long expectedVersion,
             CancellationToken cancellationToken) => Task.FromResult(OperationResult.Success());
 

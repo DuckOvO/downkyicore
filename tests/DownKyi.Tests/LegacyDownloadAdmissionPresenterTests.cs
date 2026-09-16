@@ -13,7 +13,7 @@ public sealed class LegacyDownloadAdmissionPresenterTests
     public async Task CancelLeavesGateBlockedWithoutCallingConfirmation()
     {
         var store = new GateStore();
-        using var tasks = new DownloadTaskApplicationService(store, new SystemClock());
+        using var tasks = new DownloadTaskApplicationService(store, DownloadHistoryService.CreateForSharedStore(store), new SystemClock());
         var dialogs = new RecordingDialogService(AppDialogOutcome.Canceled);
         var presenter = new LegacyDownloadAdmissionPresenter(tasks, dialogs);
 
@@ -31,7 +31,7 @@ public sealed class LegacyDownloadAdmissionPresenterTests
     public async Task ConfirmationOnlyReleasesGateAndAllowsSameSessionWithoutAnotherDialog()
     {
         var store = new GateStore();
-        using var tasks = new DownloadTaskApplicationService(store, new SystemClock());
+        using var tasks = new DownloadTaskApplicationService(store, DownloadHistoryService.CreateForSharedStore(store), new SystemClock());
         var dialogs = new RecordingDialogService(AppDialogOutcome.Accepted);
         var presenter = new LegacyDownloadAdmissionPresenter(tasks, dialogs);
 
@@ -54,7 +54,7 @@ public sealed class LegacyDownloadAdmissionPresenterTests
                 "download.store.confirmation_failed",
                 "The confirmation could not be persisted."))
         };
-        using var tasks = new DownloadTaskApplicationService(store, new SystemClock());
+        using var tasks = new DownloadTaskApplicationService(store, DownloadHistoryService.CreateForSharedStore(store), new SystemClock());
         var dialogs = new RecordingDialogService(
             AppDialogOutcome.Accepted,
             AppDialogOutcome.Accepted);
@@ -94,7 +94,10 @@ public sealed class LegacyDownloadAdmissionPresenterTests
         }
     }
 
-    private sealed class GateStore : IDownloadTaskStore
+    private sealed class GateStore :
+        IDownloadTaskStore,
+        IDownloadHistoryStore,
+        IDownloadCompletionStore
     {
         public bool Blocked { get; private set; } = true;
 
@@ -116,8 +119,20 @@ public sealed class LegacyDownloadAdmissionPresenterTests
             return Task.FromResult(OperationResult.Success());
         }
 
+        public Task<OperationResult> AddHistoryAsync(
+            DownloadHistoryRecord history,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(OperationResult.Success());
+
         public Task<OperationResult> UpdateAsync(
             DownloadTask task,
+            long expectedVersion,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(OperationResult.Success());
+
+        public Task<OperationResult> CompleteAsync(
+            DownloadTask task,
+            DownloadHistoryRecord history,
             long expectedVersion,
             CancellationToken cancellationToken) =>
             Task.FromResult(OperationResult.Success());
@@ -167,6 +182,11 @@ public sealed class LegacyDownloadAdmissionPresenterTests
             Task.FromResult(new DownloadHistoryPage([], null));
 
         public Task<OperationResult> DeleteAsync(
+            DownloadTaskId taskId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(OperationResult.Success());
+
+        public Task<OperationResult> DeleteHistoryAsync(
             DownloadTaskId taskId,
             CancellationToken cancellationToken) =>
             Task.FromResult(OperationResult.Success());

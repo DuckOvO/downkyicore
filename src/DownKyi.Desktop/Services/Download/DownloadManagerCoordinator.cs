@@ -207,8 +207,7 @@ internal sealed class DownloadManagerCoordinator : IDownloadManagerCoordinator
             return DownloadArtifactOpenResult.NotFound;
         }
 
-        var artifacts = _storage.GetRequiredSnapshot(new DownloadTaskId(item.DownloadBase.Id))
-            .Output.PublishedArtifacts;
+        var artifacts = item.HistoryRecord.PublishedArtifacts;
         if (artifacts.Count == 0)
         {
             return DownloadArtifactOpenResult.NoPublishedArtifactRecord;
@@ -231,8 +230,7 @@ internal sealed class DownloadManagerCoordinator : IDownloadManagerCoordinator
             return DownloadArtifactOpenResult.NotFound;
         }
 
-        var artifacts = _storage.GetRequiredSnapshot(new DownloadTaskId(item.DownloadBase.Id))
-            .Output.PublishedArtifacts;
+        var artifacts = item.HistoryRecord.PublishedArtifacts;
         if (artifacts.Count == 0)
         {
             return DownloadArtifactOpenResult.NoPublishedArtifactRecord;

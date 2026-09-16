@@ -1,3 +1,4 @@
+using DownKyi.Application.Downloads;
 using DownKyi.Images;
 using DownKyi.Models;
 using DownKyi.Utils;
@@ -23,6 +24,8 @@ internal class DownloadedItem : DownloadBaseItem
 
     // model数据
     public Downloaded Downloaded { get; set; } = null!;
+
+    public DownloadHistoryRecord HistoryRecord { get; set; } = null!;
 
     //  下载速度
     public string? MaxSpeedDisplay

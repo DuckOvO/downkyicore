@@ -34,11 +34,6 @@ public interface IDownloadTaskApplicationService
     Task<OperationResult> ConfirmLegacyRemoteTasksStoppedAsync(
         CancellationToken cancellationToken);
 
-    Task<DownloadHistoryPage> GetHistoryPageAsync(
-        DownloadHistoryCursor? cursor,
-        int pageSize,
-        CancellationToken cancellationToken);
-
     Task<OperationResult<DownloadTask>> StartAsync(
         DownloadTaskId taskId,
         CancellationToken cancellationToken);
@@ -154,15 +149,13 @@ public interface IDownloadTaskApplicationService
         DownloadTaskId taskId,
         CancellationToken cancellationToken);
 
-    Task<OperationResult> ClearHistoryAsync(CancellationToken cancellationToken);
 }
 
 public enum DownloadTaskChangeKind
 {
     Added,
     Updated,
-    Deleted,
-    HistoryCleared
+    Deleted
 }
 
 public sealed class DownloadTaskChangedEventArgs : EventArgs

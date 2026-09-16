@@ -25,7 +25,7 @@ internal sealed class SqliteDownloadStoreQueries(
               AND NOT EXISTS (
                   SELECT 1 FROM download_quarantine q
                   WHERE q.record_id = db.id
-                    AND q.source_table = CASE WHEN d.id IS NULL THEN 'downloading' ELSE 'downloaded' END)
+                    AND q.source_table = 'downloading')
             """;
         command.Parameters.AddWithValue("@id", taskId.Value);
         using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
@@ -40,13 +40,15 @@ internal sealed class SqliteDownloadStoreQueries(
         }
         catch (DownloadRecordCorruptException exception)
         {
-            var isHistory = !await reader
-                .IsDBNullAsync(reader.GetOrdinal("finished_timestamp"), cancellationToken)
-                .ConfigureAwait(false);
-            var source = isHistory ? "downloaded" : "downloading";
             await reader.DisposeAsync().ConfigureAwait(false);
             await SqliteDownloadStoreQuarantine
-                .RecordAsync(connection, source, taskId.Value, exception, _clock.UtcNow, cancellationToken)
+                .RecordAsync(
+                    connection,
+                    "downloading",
+                    taskId.Value,
+                    exception,
+                    _clock.UtcNow,
+                    cancellationToken)
                 .ConfigureAwait(false);
             return null;
         }
@@ -58,8 +60,7 @@ internal sealed class SqliteDownloadStoreQueries(
         using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         using var command = connection.CreateCommand();
         command.CommandText = DownloadTaskSqlReader.SelectColumns + "\n" + """
-            WHERE dl.id IS NOT NULL
-              AND NOT EXISTS (
+            WHERE NOT EXISTS (
                   SELECT 1 FROM download_quarantine q
                   WHERE q.source_table = 'downloading' AND q.record_id = db.id)
             ORDER BY db.main_title COLLATE NOCASE, db.[order] ASC, db.id ASC
@@ -81,27 +82,49 @@ internal sealed class SqliteDownloadStoreQueries(
         ArgumentOutOfRangeException.ThrowIfGreaterThan(pageSize, MaximumHistoryPageSize);
         using var connection = await _database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         using var command = connection.CreateCommand();
-        command.CommandText = DownloadTaskSqlReader.SelectColumns + "\n" + """
-            WHERE d.id IS NOT NULL
-              AND (@cursor_timestamp IS NULL
-                   OR d.finished_timestamp < @cursor_timestamp
-                   OR (d.finished_timestamp = @cursor_timestamp AND d.id < @cursor_id))
+        command.CommandText = DownloadHistoryRecordMapper.SelectColumns + "\n" + """
+            WHERE (@cursor_timestamp IS NULL
+                   OR h.finished_timestamp < @cursor_timestamp
+                   OR (h.finished_timestamp = @cursor_timestamp AND h.id < @cursor_id))
               AND NOT EXISTS (
                   SELECT 1 FROM download_quarantine q
-                  WHERE q.source_table = 'downloaded' AND q.record_id = db.id)
-            ORDER BY d.finished_timestamp DESC, d.id DESC
+                  WHERE q.source_table = 'download_history' AND q.record_id = h.id)
+            ORDER BY h.finished_timestamp DESC, h.id DESC
             LIMIT @limit
             """;
-        command.Parameters.AddWithValue("@cursor_timestamp", cursor?.FinishedTimestamp ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("@cursor_id", cursor?.TaskId.Value ?? string.Empty);
-        command.Parameters.AddWithValue("@limit", checked(pageSize + 1));
-        var items = (await ReadManyAsync(
-                connection,
-                command,
-                "downloaded",
-                _clock.UtcNow,
-                cancellationToken).ConfigureAwait(false))
-            .ToList();
+        var cursorTimestamp = command.Parameters.Add("@cursor_timestamp", SqliteType.Integer);
+        var cursorId = command.Parameters.Add("@cursor_id", SqliteType.Text);
+        var limit = command.Parameters.Add("@limit", SqliteType.Integer);
+        var targetCount = checked(pageSize + 1);
+        var items = new List<DownloadHistoryRecord>(targetCount);
+        var scanCursor = cursor;
+        while (items.Count < targetCount)
+        {
+            cursorTimestamp.Value = scanCursor == null
+                ? DBNull.Value
+                : scanCursor.FinishedTimestamp;
+            cursorId.Value = scanCursor?.TaskId.Value ?? string.Empty;
+            var remainingCount = targetCount - items.Count;
+            limit.Value = remainingCount;
+            var batch = await ReadHistoryManyAsync(
+                    connection,
+                    command,
+                    _clock.UtcNow,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            items.AddRange(batch.Records);
+            if (batch.RowsRead < remainingCount)
+            {
+                break;
+            }
+
+            if (batch.Records.Count > 0)
+            {
+                var last = batch.Records[^1];
+                scanCursor = new DownloadHistoryCursor(last.FinishedTimestamp, last.Id);
+            }
+        }
+
         var hasMore = items.Count > pageSize;
         if (hasMore)
         {
@@ -112,10 +135,53 @@ internal sealed class SqliteDownloadStoreQueries(
         if (hasMore && items.Count > 0)
         {
             var last = items[^1];
-            nextCursor = new DownloadHistoryCursor(last.Completion!.FinishedTimestamp, last.Id);
+            nextCursor = new DownloadHistoryCursor(last.FinishedTimestamp, last.Id);
         }
 
         return new DownloadHistoryPage(items, nextCursor);
+    }
+
+    private static async Task<(IReadOnlyList<DownloadHistoryRecord> Records, int RowsRead)>
+        ReadHistoryManyAsync(
+        SqliteConnection connection,
+        SqliteCommand command,
+        DateTimeOffset quarantinedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        var records = new List<DownloadHistoryRecord>();
+        var corrupt = new List<(string RecordId, DownloadRecordCorruptException Error)>();
+        var rowsRead = 0;
+        using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+        {
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                rowsRead++;
+                var recordId = reader.GetString(reader.GetOrdinal("id"));
+                try
+                {
+                    records.Add(DownloadHistoryRecordMapper.Read(reader));
+                }
+                catch (DownloadRecordCorruptException exception)
+                {
+                    corrupt.Add((recordId, exception));
+                }
+            }
+        }
+
+        foreach (var item in corrupt)
+        {
+            await SqliteDownloadStoreQuarantine
+                .RecordAsync(
+                    connection,
+                    "download_history",
+                    item.RecordId,
+                    item.Error,
+                    quarantinedAtUtc,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        return (records, rowsRead);
     }
 
     private static async Task<IReadOnlyList<DownloadTask>> ReadManyAsync(

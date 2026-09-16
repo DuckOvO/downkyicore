@@ -80,8 +80,7 @@ internal static class DownloadTaskRecordMapper
             GetNullableString(reader, "download_content"),
             GetNullableString(reader, "download_status_title"),
             reader.IsDBNull(reader.GetOrdinal("max_speed")) ? 0 : reader.GetInt64(reader.GetOrdinal("max_speed")));
-        var isCompleted = !reader.IsDBNull(reader.GetOrdinal("finished_timestamp"));
-        var phase = isCompleted ? DownloadPhase.Completed : ReadPhase(reader);
+        var phase = ReadPhase(reader);
         DownloadFailure? failure = null;
         if (phase == DownloadPhase.Failed)
         {
@@ -92,15 +91,6 @@ internal static class DownloadTaskRecordMapper
                     ?? "Stored download failed.",
                 !reader.IsDBNull(reader.GetOrdinal("failure_transient"))
                     && reader.GetBoolean(reader.GetOrdinal("failure_transient")));
-        }
-
-        DownloadCompletion? completion = null;
-        if (isCompleted)
-        {
-            completion = new DownloadCompletion(
-                reader.GetInt64(reader.GetOrdinal("finished_timestamp")),
-                GetString(reader, "finished_time"),
-                GetNullableString(reader, "max_speed_display"));
         }
 
         var createdAt = ReadTimestamp(reader, "created_at_utc");
@@ -124,7 +114,7 @@ internal static class DownloadTaskRecordMapper
             progress,
             transfer,
             failure,
-            completion,
+            null,
             reader.GetInt64(reader.GetOrdinal("version")),
             createdAt,
             updatedAt);

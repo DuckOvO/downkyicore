@@ -7,7 +7,11 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace DownKyi.Infrastructure.Downloads;
 
-public sealed class SqliteDownloadTaskStore : IDownloadTaskStore, IDisposable
+public sealed class SqliteDownloadTaskStore :
+    IDownloadTaskStore,
+    IDownloadHistoryStore,
+    IDownloadCompletionStore,
+    IDisposable
 {
     private readonly SqliteDownloadStoreDatabase _database;
     private readonly SqliteDownloadStoreQueries _queries;
@@ -73,11 +77,25 @@ public sealed class SqliteDownloadTaskStore : IDownloadTaskStore, IDisposable
     public async Task<OperationResult> AddAsync(DownloadTask task, CancellationToken cancellationToken) =>
         await _outputReservations.AddAsync(task, cancellationToken).ConfigureAwait(false);
 
+    public async Task<OperationResult> AddHistoryAsync(
+        DownloadHistoryRecord history,
+        CancellationToken cancellationToken) =>
+        await _commands.AddHistoryAsync(history, cancellationToken).ConfigureAwait(false);
+
     public async Task<OperationResult> UpdateAsync(
         DownloadTask task,
         long expectedVersion,
         CancellationToken cancellationToken) =>
         await _commands.UpdateAsync(task, expectedVersion, cancellationToken).ConfigureAwait(false);
+
+    public async Task<OperationResult> CompleteAsync(
+        DownloadTask task,
+        DownloadHistoryRecord history,
+        long expectedVersion,
+        CancellationToken cancellationToken) =>
+        await _commands
+            .CompleteAsync(task, history, expectedVersion, cancellationToken)
+            .ConfigureAwait(false);
 
     public async Task<OperationResult> UpdateProgressAsync(
         DownloadProgressWrite progressWrite,
@@ -117,6 +135,11 @@ public sealed class SqliteDownloadTaskStore : IDownloadTaskStore, IDisposable
         DownloadTaskId taskId,
         CancellationToken cancellationToken) =>
         await _commands.DeleteAsync(taskId, cancellationToken).ConfigureAwait(false);
+
+    public async Task<OperationResult> DeleteHistoryAsync(
+        DownloadTaskId taskId,
+        CancellationToken cancellationToken) =>
+        await _commands.DeleteHistoryAsync(taskId, cancellationToken).ConfigureAwait(false);
 
     public async Task<OperationResult> ClearHistoryAsync(CancellationToken cancellationToken) =>
         await _commands.ClearHistoryAsync(cancellationToken).ConfigureAwait(false);

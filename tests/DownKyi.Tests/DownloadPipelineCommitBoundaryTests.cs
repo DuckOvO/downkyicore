@@ -75,7 +75,10 @@ public sealed class DownloadPipelineCommitBoundaryTests
         Assert.True(result.IsSuccess);
         harness.AssertSourcesAndSidecarsDeleted();
         Assert.True(File.Exists(harness.PublishedOutput));
-        Assert.Equal(DownloadPhase.Completed, harness.Store.Current?.Phase);
+        Assert.Null(harness.Store.Current);
+        Assert.NotNull(harness.Store.History);
+        Assert.Equal(harness.PublishedOutput,
+            harness.Store.History.PublishedArtifacts["media"]);
         Assert.Empty(harness.Lists.Downloading);
         Assert.Single(harness.Lists.Downloaded);
     }
@@ -114,9 +117,10 @@ public sealed class DownloadPipelineCommitBoundaryTests
         Assert.True(retry.IsSuccess);
         Assert.Equal(new byte[] { 7, 8, 9 }, await File.ReadAllBytesAsync(harness.PublishedOutput, TestContext.Current.CancellationToken));
         Assert.False(File.Exists(harness.Output));
-        Assert.Equal(DownloadPhase.Completed, harness.Store.Current?.Phase);
+        Assert.Null(harness.Store.Current);
+        Assert.NotNull(harness.Store.History);
         Assert.Equal(harness.PublishedOutput,
-            harness.Store.Current?.Output.PublishedArtifacts["media"]);
+            harness.Store.History.PublishedArtifacts["media"]);
         harness.AssertSourcesAndSidecarsDeleted();
     }
 
@@ -203,8 +207,12 @@ public sealed class DownloadPipelineCommitBoundaryTests
             var settings = new SettingsStore(Path.Combine(directory, "settings.json"));
             var store = new CommitBoundaryStore(rejectCompletion, rejectPublishingStart);
             var clock = new SystemClock();
-            var tasks = new DownloadTaskApplicationService(store, clock);
-            var projectionStore = new DownloadTaskProjectionStore(tasks, clock);
+            var historyService = DownloadHistoryService.CreateForSharedStore(store);
+            var tasks = new DownloadTaskApplicationService(store, historyService, clock);
+            var projectionStore = new DownloadTaskProjectionStore(
+                tasks,
+                historyService,
+                clock);
             var stateWriter = new DownloadTaskStateWriter(tasks);
             var taskId = new DownloadTaskId(Guid.NewGuid().ToString("N"));
             var downloadBase = new DownloadBase
@@ -335,9 +343,14 @@ public sealed class DownloadPipelineCommitBoundaryTests
 
     private sealed class CommitBoundaryStore(
         bool rejectCompletion,
-        bool rejectPublishingStart) : IDownloadTaskStore
+        bool rejectPublishingStart) :
+        IDownloadTaskStore,
+        IDownloadHistoryStore,
+        IDownloadCompletionStore
     {
         public DownloadTask? Current { get; private set; }
+
+        public DownloadHistoryRecord? History { get; private set; }
 
         public Task InitializeAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
@@ -347,6 +360,14 @@ public sealed class DownloadPipelineCommitBoundaryTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Current = task;
+            return Task.FromResult(OperationResult.Success());
+        }
+
+        public Task<OperationResult> AddHistoryAsync(
+            DownloadHistoryRecord history,
+            CancellationToken cancellationToken)
+        {
+            History = history;
             return Task.FromResult(OperationResult.Success());
         }
 
@@ -383,6 +404,35 @@ public sealed class DownloadPipelineCommitBoundaryTests
             }
 
             Current = task;
+            return Task.FromResult(OperationResult.Success());
+        }
+
+        public Task<OperationResult> CompleteAsync(
+            DownloadTask task,
+            DownloadHistoryRecord history,
+            long expectedVersion,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (Current == null || Current.Version != expectedVersion)
+            {
+                return Task.FromResult(OperationResult.Failure(
+                    new OperationError(
+                        "download.store.conflict",
+                        "Version conflict.",
+                        OperationErrorKind.Conflict)));
+            }
+
+            if (rejectCompletion)
+            {
+                return Task.FromResult(OperationResult.Failure(
+                    OperationError.Unexpected(
+                        "download.store.synthetic-completion-failure",
+                        "Synthetic completion persistence failure.")));
+            }
+
+            Current = null;
+            History = history;
             return Task.FromResult(OperationResult.Success());
         }
 
@@ -423,13 +473,21 @@ public sealed class DownloadPipelineCommitBoundaryTests
             int pageSize,
             CancellationToken cancellationToken) =>
             Task.FromResult(new DownloadHistoryPage(
-                Current?.Phase == DownloadPhase.Completed ? [Current] : [],
+                History == null ? [] : [History],
                 null));
 
         public Task<OperationResult> DeleteAsync(
             DownloadTaskId taskId,
             CancellationToken cancellationToken) =>
             Task.FromResult(OperationResult.Success());
+
+        public Task<OperationResult> DeleteHistoryAsync(
+            DownloadTaskId taskId,
+            CancellationToken cancellationToken)
+        {
+            History = null;
+            return Task.FromResult(OperationResult.Success());
+        }
 
         public Task<OperationResult> ClearHistoryAsync(CancellationToken cancellationToken) =>
             Task.FromResult(OperationResult.Success());

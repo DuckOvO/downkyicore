@@ -37,8 +37,7 @@ internal sealed record LegacyDownloadRow(
     string Id,
     string BasePath,
     int LegacyStatus,
-    string? ReservationKey,
-    bool IsCompleted);
+    string? ReservationKey);
 
 internal sealed record LegacyDownloadStoreSnapshot(
     LegacyDownloadStoreFormat Format,

@@ -11,7 +11,7 @@ public sealed class DownloadStoreSchemaArchitectureTests
     {
         var source = ReadDownloadSource("DownloadStoreSchema.cs");
 
-        Assert.Contains("public const int CurrentVersion = 8", source, StringComparison.Ordinal);
+        Assert.Contains("public const int CurrentVersion = 9", source, StringComparison.Ordinal);
         Assert.Contains("LegacyDownloadStoreFormatDetector", source, StringComparison.Ordinal);
         Assert.Contains("LegacyDownloadStoreReader", source, StringComparison.Ordinal);
         Assert.Contains("LegacyDownloadStoreNormalizer", source, StringComparison.Ordinal);
@@ -78,6 +78,8 @@ public sealed class DownloadStoreSchemaArchitectureTests
         var source = ReadDownloadSource("CurrentDownloadStoreWriter.cs");
 
         Assert.Contains("CREATE TABLE download_base", source, StringComparison.Ordinal);
+        Assert.Contains("CREATE TABLE download_history", source, StringComparison.Ordinal);
+        Assert.Contains("ProjectLegacyHistoryAsync", source, StringComparison.Ordinal);
         Assert.Contains("ApplyPhaseUpdatesAsync", source, StringComparison.Ordinal);
         Assert.Contains("ApplyReservationUpdatesAsync", source, StringComparison.Ordinal);
         Assert.Contains("ApplyQuarantineAsync", source, StringComparison.Ordinal);
@@ -85,6 +87,7 @@ public sealed class DownloadStoreSchemaArchitectureTests
         Assert.DoesNotContain("format.UserVersion", source, StringComparison.Ordinal);
         Assert.DoesNotContain("DownloadStoreSchemaV", source, StringComparison.Ordinal);
         Assert.DoesNotContain("IPhysicalOutputPathResolver", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("SET source_table = 'downloading'", source, StringComparison.Ordinal);
     }
 
     [Fact]

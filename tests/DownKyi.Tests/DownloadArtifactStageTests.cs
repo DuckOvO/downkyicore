@@ -112,8 +112,15 @@ public sealed class DownloadArtifactStageTests
             using (var firstStore = CreateSqliteStore(databasePath))
             {
                 await firstStore.InitializeAsync(TestContext.Current.CancellationToken);
-                using var firstTasks = new DownloadTaskApplicationService(firstStore, new SystemClock());
-                using var firstProjections = new DownloadTaskProjectionStore(firstTasks, new SystemClock());
+                var firstHistoryService = DownloadHistoryService.CreateForSharedStore(firstStore);
+                using var firstTasks = new DownloadTaskApplicationService(
+                    firstStore,
+                    firstHistoryService,
+                    new SystemClock());
+                using var firstProjections = new DownloadTaskProjectionStore(
+                    firstTasks,
+                    firstHistoryService,
+                    new SystemClock());
                 await firstProjections.AddDownloadingAsync(
                     admitted,
                     TestContext.Current.CancellationToken);
@@ -132,8 +139,15 @@ public sealed class DownloadArtifactStageTests
             });
             using var reopenedStore = CreateSqliteStore(databasePath);
             await reopenedStore.InitializeAsync(TestContext.Current.CancellationToken);
-            using var reopenedTasks = new DownloadTaskApplicationService(reopenedStore, new SystemClock());
-            using var reopenedProjections = new DownloadTaskProjectionStore(reopenedTasks, new SystemClock());
+            var reopenedHistoryService = DownloadHistoryService.CreateForSharedStore(reopenedStore);
+            using var reopenedTasks = new DownloadTaskApplicationService(
+                reopenedStore,
+                reopenedHistoryService,
+                new SystemClock());
+            using var reopenedProjections = new DownloadTaskProjectionStore(
+                reopenedTasks,
+                reopenedHistoryService,
+                new SystemClock());
             var startup = await reopenedProjections.GetDownloadingStateAsync(
                 TestContext.Current.CancellationToken);
             var reopenedItem = Assert.Single(startup.Projections);
@@ -865,8 +879,12 @@ public sealed class DownloadArtifactStageTests
                 };
             }
             var store = new SingleTaskStore();
-            var tasks = new DownloadTaskApplicationService(store, new SystemClock());
-            var projections = new DownloadTaskProjectionStore(tasks, new SystemClock());
+            var historyService = DownloadHistoryService.CreateForSharedStore(store);
+            var tasks = new DownloadTaskApplicationService(store, historyService, new SystemClock());
+            var projections = new DownloadTaskProjectionStore(
+                tasks,
+                historyService,
+                new SystemClock());
             var stateWriter = new DownloadTaskStateWriter(tasks);
             await projections.AddDownloadingAsync(
                 downloading,
@@ -906,7 +924,10 @@ public sealed class DownloadArtifactStageTests
         }
     }
 
-    private sealed class SingleTaskStore : IDownloadTaskStore
+    private sealed class SingleTaskStore :
+        IDownloadTaskStore,
+        IDownloadHistoryStore,
+        IDownloadCompletionStore
     {
         private DownloadTask? _task;
 
@@ -921,6 +942,11 @@ public sealed class DownloadArtifactStageTests
             return Task.FromResult(OperationResult.Success());
         }
 
+        public Task<OperationResult> AddHistoryAsync(
+            DownloadHistoryRecord history,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(OperationResult.Success());
+
         public Task<OperationResult> UpdateAsync(
             DownloadTask task,
             long expectedVersion,
@@ -934,6 +960,16 @@ public sealed class DownloadArtifactStageTests
             }
 
             _task = task;
+            return Task.FromResult(OperationResult.Success());
+        }
+
+        public Task<OperationResult> CompleteAsync(
+            DownloadTask task,
+            DownloadHistoryRecord history,
+            long expectedVersion,
+            CancellationToken cancellationToken)
+        {
+            _task = null;
             return Task.FromResult(OperationResult.Success());
         }
 
@@ -971,6 +1007,11 @@ public sealed class DownloadArtifactStageTests
             Task.FromResult(new DownloadHistoryPage([], null));
 
         public Task<OperationResult> DeleteAsync(
+            DownloadTaskId taskId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(OperationResult.Success());
+
+        public Task<OperationResult> DeleteHistoryAsync(
             DownloadTaskId taskId,
             CancellationToken cancellationToken) =>
             Task.FromResult(OperationResult.Success());

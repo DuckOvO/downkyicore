@@ -51,6 +51,25 @@ internal static class LegacyDownloadStoreFormatDetector
         "finished_time"
     ];
 
+    private static readonly string[] CurrentHistoryColumns =
+    [
+        "id",
+        "cid",
+        "zone_id",
+        "order",
+        "main_title",
+        "name",
+        "duration",
+        "video_codec_name",
+        "resolution",
+        "audio_codec",
+        "file_size",
+        "published_artifacts",
+        "finished_timestamp",
+        "finished_time",
+        "max_speed_display"
+    ];
+
     private static readonly string[] BaseStateColumns =
     [
         "version",
@@ -119,9 +138,16 @@ internal static class LegacyDownloadStoreFormatDetector
         var downloadedColumns = tables.Contains("downloaded")
             ? await ReadDownloadedColumnsAsync(connection, cancellationToken).ConfigureAwait(false)
             : [];
-        var hasCoreTables = CoreBaseColumns.All(baseColumns.Contains)
-                            && CoreDownloadingColumns.All(downloadingColumns.Contains)
-                            && CoreDownloadedColumns.All(downloadedColumns.Contains);
+        var historyColumns = tables.Contains("download_history")
+            ? await ReadHistoryColumnsAsync(connection, cancellationToken).ConfigureAwait(false)
+            : [];
+        var hasLegacyCoreTables = CoreBaseColumns.All(baseColumns.Contains)
+                                  && CoreDownloadingColumns.All(downloadingColumns.Contains)
+                                  && CoreDownloadedColumns.All(downloadedColumns.Contains);
+        var hasCurrentHistoryShape = CoreBaseColumns.All(baseColumns.Contains)
+                                     && CoreDownloadingColumns.All(downloadingColumns.Contains)
+                                     && CurrentHistoryColumns.All(historyColumns.Contains)
+                                     && !tables.Contains("downloaded");
         var hasStateColumns = BaseStateColumns.All(baseColumns.Contains)
                               && DownloadingStateColumns.All(downloadingColumns.Contains);
         var hasAnyStateColumns = BaseStateColumns.Any(baseColumns.Contains)
@@ -136,7 +162,9 @@ internal static class LegacyDownloadStoreFormatDetector
         var kind = DetectKind(
             userVersion,
             tables.Count == 0,
-            hasCoreTables,
+            hasLegacyCoreTables,
+            tables.Contains("download_history"),
+            hasCurrentHistoryShape,
             tables.Contains("download_schema_migrations"),
             tables.Contains("download_quarantine"),
             hasStateColumns,
@@ -153,7 +181,7 @@ internal static class LegacyDownloadStoreFormatDetector
             Kind: kind,
             DatabaseExisted: true,
             UserVersion: userVersion,
-            HasCoreTables: hasCoreTables,
+            HasCoreTables: hasLegacyCoreTables || hasCurrentHistoryShape,
             HasSchemaLedger: tables.Contains("download_schema_migrations"),
             HasQuarantine: tables.Contains("download_quarantine"),
             HasStateColumns: hasStateColumns,
@@ -168,7 +196,9 @@ internal static class LegacyDownloadStoreFormatDetector
     private static LegacyDownloadStoreKind DetectKind(
         int userVersion,
         bool hasNoTables,
-        bool hasCoreTables,
+        bool hasLegacyCoreTables,
+        bool hasHistoryTable,
+        bool hasCurrentHistoryShape,
         bool hasSchemaLedger,
         bool hasQuarantine,
         bool hasStateColumns,
@@ -186,7 +216,23 @@ internal static class LegacyDownloadStoreFormatDetector
             return LegacyDownloadStoreKind.New;
         }
 
-        if (!hasCoreTables
+        if (hasCurrentHistoryShape
+            && userVersion == DownloadStoreSchema.CurrentVersion
+            && hasSchemaLedger
+            && hasQuarantine
+            && hasStateColumns
+            && hasReservationKey
+            && hasAdmissionGate
+            && hasNfoRequest
+            && hasPublishedArtifacts
+            && hasStagingToken
+            && hasPublishingArtifact)
+        {
+            return LegacyDownloadStoreKind.Current;
+        }
+
+        if (hasHistoryTable
+            || !hasLegacyCoreTables
             || hasAnyStateColumns != hasStateColumns
             || hasAnyPublishingArtifact != hasPublishingArtifact)
         {
@@ -253,9 +299,7 @@ internal static class LegacyDownloadStoreFormatDetector
             return LegacyDownloadStoreKind.Unsupported;
         }
 
-        return additiveShapeVersion == DownloadStoreSchema.CurrentVersion
-            ? LegacyDownloadStoreKind.Current
-            : LegacyDownloadStoreKind.AdmissionSafe;
+        return LegacyDownloadStoreKind.AdmissionSafe;
     }
 
     private static async Task<HashSet<string>> ReadDownloadBaseColumnsAsync(
@@ -282,6 +326,15 @@ internal static class LegacyDownloadStoreFormatDetector
     {
         using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA table_info(downloaded)";
+        return await ReadColumnNamesAsync(command, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<HashSet<string>> ReadHistoryColumnsAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA table_info(download_history)";
         return await ReadColumnNamesAsync(command, cancellationToken).ConfigureAwait(false);
     }
 
