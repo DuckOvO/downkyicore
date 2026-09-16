@@ -149,17 +149,6 @@ internal static class CurrentDownloadStoreWriter
         command.CommandText = """
             DELETE FROM download_quarantine
             WHERE source_table = 'downloaded'
-              AND record_id IN (SELECT id FROM downloading)
-              AND EXISTS (
-                  SELECT 1
-                  FROM download_quarantine active_quarantine
-                  WHERE active_quarantine.source_table = 'downloading'
-                    AND active_quarantine.record_id = download_quarantine.record_id
-              );
-
-            UPDATE download_quarantine
-            SET source_table = 'downloading'
-            WHERE source_table = 'downloaded'
               AND record_id IN (SELECT id FROM downloading);
 
             DELETE FROM downloaded
