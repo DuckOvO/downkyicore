@@ -27,7 +27,7 @@ internal sealed class RootProcessIdentity
 {
     public int Pid { get; init; }
 
-    public DateTimeOffset StartTimeUtc { get; init; }
+    public DateTimeOffset? StartTimeUtc { get; init; }
 }
 
 internal sealed class RecorderEvent

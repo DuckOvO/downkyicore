@@ -47,13 +47,12 @@ public sealed class FlightRecorderOutputTests
     }
 
     [Fact]
-    public async Task RootIdentityFailureStillDrainsOutputProducedByTheOwnedProcess()
+    public async Task MissingRootStartTimeDoesNotOverrideExitCodeOrOutputDrain()
     {
         const string secret = "fixture-root-identity-secret";
         var evidenceDirectory = Path.Combine(
             Path.GetTempPath(),
             $"downkyi-flight-recorder-identity-{Guid.NewGuid():N}");
-        var readyPath = Path.Combine(evidenceDirectory, "fixture-ready");
         Directory.CreateDirectory(evidenceDirectory);
         try
         {
@@ -61,28 +60,31 @@ public sealed class FlightRecorderOutputTests
                 new ProcessExecutionRequest(
                     "fixture.identity-failure.slice",
                     "fixture.identity-failure.test",
-                    CreateFixtureStartInfo(secret, readyPath),
+                    CreateFixtureStartInfo(secret),
                     TimeSpan.FromSeconds(10),
                     TimeSpan.FromSeconds(3),
                     evidenceDirectory,
-                    RootStartTimeReader: _ =>
-                    {
-                        if (!SpinWait.SpinUntil(() => File.Exists(readyPath), TimeSpan.FromSeconds(3)))
-                        {
-                            throw new InvalidOperationException("The fixture did not produce output before identity capture.");
-                        }
-
-                        throw new System.ComponentModel.Win32Exception("fixture identity unavailable");
-                    }),
+                    RootStartTimeReader: _ => throw new System.ComponentModel.Win32Exception(
+                        "fixture start time unavailable")),
                 CancellationToken.None);
 
-            Assert.Equal(2, result.ExitCode);
+            Assert.Equal(1, result.ExitCode);
+            Assert.Null(result.RootStartTimeUtc);
             var artifact = await File.ReadAllTextAsync(
                 result.EvidencePath,
                 TestContext.Current.CancellationToken);
             Assert.DoesNotContain(secret, artifact, StringComparison.Ordinal);
             using var document = JsonDocument.Parse(artifact);
-            Assert.Equal("root_identity_failed", document.RootElement.GetProperty("Outcome").GetString());
+            var rootProcess = document.RootElement.GetProperty("RootProcess");
+            Assert.Equal(result.RootPid, rootProcess.GetProperty("Pid").GetInt32());
+            Assert.False(rootProcess.TryGetProperty("StartTimeUtc", out _));
+            Assert.Equal("process_exit", document.RootElement.GetProperty("Outcome").GetString());
+            Assert.Contains(
+                document.RootElement.GetProperty("Events").EnumerateArray(),
+                item => string.Equals(
+                    item.GetProperty("Event").GetString(),
+                    "root_start_time_unavailable",
+                    StringComparison.Ordinal));
             Assert.Contains(
                 DiscardedLineMarker,
                 document.RootElement.GetProperty("StdoutTail").GetString(),

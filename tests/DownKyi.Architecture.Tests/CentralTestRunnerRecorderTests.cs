@@ -25,7 +25,7 @@ public sealed class CentralTestRunnerRecorderTests
 
             Assert.NotEqual(0, result.ExitCode);
             Assert.True(result.RootPid > 0);
-            Assert.NotEqual(default, result.RootStartTimeUtc);
+            Assert.NotNull(result.RootStartTimeUtc);
             Assert.True(File.Exists(result.EvidencePath));
 
             using var document = JsonDocument.Parse(await File.ReadAllTextAsync(
@@ -50,7 +50,7 @@ public sealed class CentralTestRunnerRecorderTests
                 CultureInfo.InvariantCulture,
                 DateTimeStyles.None);
             Assert.InRange(
-                Math.Abs((fixtureStartTime - result.RootStartTimeUtc).TotalSeconds),
+                Math.Abs((fixtureStartTime - result.RootStartTimeUtc.Value).TotalSeconds),
                 0,
                 1);
 
@@ -80,7 +80,7 @@ public sealed class CentralTestRunnerRecorderTests
                         item.TryGetProperty("ExitCode", out _));
 
             var snapshot = report.GetProperty("FinalSnapshot");
-            Assert.True(snapshot.GetProperty("CapturedAtUtc").GetDateTimeOffset() > result.RootStartTimeUtc);
+            Assert.True(snapshot.GetProperty("CapturedAtUtc").GetDateTimeOffset() > result.RootStartTimeUtc.Value);
             Assert.Contains(
                 "absence is not proof",
                 snapshot.GetProperty("Completeness").GetString(),
@@ -571,7 +571,7 @@ public sealed class CentralTestRunnerRecorderTests
     }
 
     [Fact]
-    public async Task PassingTestProcessDiscardsRecorderArtifact()
+    public async Task MissingRootStartTimeDoesNotOverridePassingProcess()
     {
         var evidenceDirectory = CreateEvidenceDirectory();
         try
@@ -583,10 +583,13 @@ public sealed class CentralTestRunnerRecorderTests
                     CreateFixtureStartInfo("fixture-pass"),
                     TimeSpan.FromSeconds(10),
                     TimeSpan.FromSeconds(3),
-                    evidenceDirectory),
+                    evidenceDirectory,
+                    RootStartTimeReader: _ => throw new InvalidOperationException(
+                        "fixture start time unavailable")),
                 CancellationToken.None);
 
             Assert.Equal(0, result.ExitCode);
+            Assert.Null(result.RootStartTimeUtc);
             await FlightRecorderExecution.DiscardAsync(result);
             Assert.Empty(Directory.EnumerateFiles(evidenceDirectory));
         }

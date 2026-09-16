@@ -16,7 +16,7 @@ internal sealed record ProcessExecutionRequest(
 internal sealed record ProcessExecutionResult(
     int ExitCode,
     int RootPid,
-    DateTimeOffset RootStartTimeUtc,
+    DateTimeOffset? RootStartTimeUtc,
     string EvidencePath,
     FlightRecorder Recorder);
 
@@ -56,27 +56,12 @@ internal static class FlightRecorderExecution
                 recorder.Redactor,
                 outputCapture.Token), CancellationToken.None);
             var rootPid = scope.RootPid;
-            DateTimeOffset rootStartTime;
-            try
+            var rootStartTime = request.RootStartTimeReader is null
+                ? scope.RootStartTimeUtc
+                : OwnedProcessScope.ReadStartTimeUtcBestEffort(process, request.RootStartTimeReader);
+            if (rootStartTime is null)
             {
-                rootStartTime = request.RootStartTimeReader?.Invoke(process) ?? scope.RootStartTimeUtc;
-            }
-            catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
-            {
-                var cleanup = new CleanupDeadline(request.CleanupTimeout);
-                recorder.RecordInMemory("root_identity_failed", pid: rootPid, detail: exception.Message);
-                await recorder.CaptureFinalSnapshotOnceAsync(cleanup).ConfigureAwait(false);
-                await StopAsync(scope, cleanup, recorder).ConfigureAwait(false);
-                await DrainOutputAsync(
-                    outputTask,
-                    errorTask,
-                    outputCapture,
-                    cleanup,
-                    recorder,
-                    rootPid).ConfigureAwait(false);
-                await recorder.FinalizeFailureAsync("root_identity_failed", standardOutput, standardError, cleanup)
-                    .ConfigureAwait(false);
-                return new ProcessExecutionResult(2, rootPid, default, recorder.EvidencePath, recorder);
+                recorder.RecordInMemory("root_start_time_unavailable", pid: rootPid);
             }
 
             recorder.SetRootIdentity(rootPid, rootStartTime);
