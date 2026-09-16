@@ -184,13 +184,6 @@ internal static class SqliteProgressScenario
             CancellationToken cancellationToken) =>
             _inner.UpdateAsync(task, expectedVersion, cancellationToken);
 
-        public Task<OperationResult> CompleteAsync(
-            DownloadTask task,
-            DownloadHistoryRecord history,
-            long expectedVersion,
-            CancellationToken cancellationToken) =>
-            _inner.CompleteAsync(task, history, expectedVersion, cancellationToken);
-
         public async Task<OperationResult> UpdateProgressAsync(
             DownloadProgressWrite progressWrite,
             CancellationToken cancellationToken)
